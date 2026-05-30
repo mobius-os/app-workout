@@ -502,8 +502,9 @@ function SessionLogger({ session, programId, sessionIdx, onSave, onCancel }) {
           <button
             style={S.restBtn}
             onClick={() => setRestStart(null)}
+            aria-label="Dismiss rest timer"
           >
-            Reset
+            Dismiss ×
           </button>
         )}
       </div>
