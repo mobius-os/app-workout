@@ -57,13 +57,16 @@ function makeStore(appId, token) {
 // ---------------------------------------------------------------------------
 // Defaults — used only if state.json failed to seed (older mobius without
 // storage_seeds support, or a manual install path). The manifest's
-// storage_seeds.state.json is the canonical starter pack; this constant is
-// a belt-and-braces fallback so the app is never blank.
+// storage_seeds.state.json is the canonical starter pack with all three
+// programs; this constant is a deliberately-minimal belt-and-braces fallback
+// so the app is never blank. `starter_pack_installed: false` flags that the
+// full pack didn't land — the Programs tab uses it to show a hint that the
+// user can reinstall to get the rest.
 // ---------------------------------------------------------------------------
 
 const FALLBACK_STATE = {
   active_program_id: 'ppl6',
-  starter_pack_installed: true,
+  starter_pack_installed: false,
   history: [],
   programs: {
     ppl6: {
@@ -763,12 +766,26 @@ function ProgramsTab({ state, onState }) {
 
   const entries = Object.entries(state.programs || {})
 
+  // If state was hydrated from the inline FALLBACK_STATE (because the
+  // manifest's storage_seeds didn't land — older mobius, manual install,
+  // or storage write race), the user is missing two of the three starter
+  // packs. Surface a one-line hint so they know reinstalling will fix it.
+  const starterPackMissing = state.starter_pack_installed === false
+
   return (
     <div>
       <p style={S.cardSub}>
         Tap a program to make it active. Fork a starter to customise it; built-in
         starters are read-only.
       </p>
+      {starterPackMissing && (
+        <div style={{ ...S.card, borderColor: 'var(--accent)' }}>
+          <p style={{ ...S.cardSub, margin: 0 }}>
+            Only the minimal starter is installed. Reinstall the app from the
+            App Store to get the full PPL / full-body / upper-lower pack.
+          </p>
+        </div>
+      )}
       {entries.map(([id, prog]) => {
         const isActive = id === state.active_program_id
         const isStarter = id === 'ppl6' || id === 'fb3' || id === 'ul4'
