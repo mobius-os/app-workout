@@ -213,8 +213,10 @@ const S = {
     border: '1px solid var(--border)', borderRadius: '10px',
     padding: '2px',
   },
+  // 44px tap target per iOS HIG — the visual ± stays the same, the
+  // surface around it is the bit your thumb actually lands on.
   stepBtn: {
-    width: '36px', height: '36px',
+    width: '44px', height: '44px',
     border: 'none', background: 'transparent', color: 'var(--text)',
     fontSize: '18px', fontWeight: 700, cursor: 'pointer',
     fontFamily: 'var(--font)',
@@ -229,7 +231,7 @@ const S = {
   },
   stepWrap: { display: 'flex', flexDirection: 'column', gap: '2px' },
   doneToggle: (done) => ({
-    width: '36px', height: '36px', borderRadius: '10px',
+    width: '44px', height: '44px', borderRadius: '10px',
     border: `1px solid ${done ? 'var(--accent)' : 'var(--border)'}`,
     background: done ? 'var(--accent)' : 'transparent',
     color: done ? '#fff' : 'var(--muted)',
@@ -950,7 +952,7 @@ function ProgramEditor({ program, onSave, onCancel }) {
           {sess.exercises.map((ex, eIdx) => (
             <div key={eIdx} style={{
               display: 'grid',
-              gridTemplateColumns: '1fr 50px 50px 60px 28px',
+              gridTemplateColumns: '1fr 50px 50px 60px 36px',
               gap: '6px', alignItems: 'center', marginBottom: '6px',
             }}>
               <input
@@ -962,26 +964,36 @@ function ProgramEditor({ program, onSave, onCancel }) {
               <input
                 style={{ ...S.textInput, textAlign: 'center' }}
                 type="number"
+                inputMode="numeric"
+                min="1"
                 value={ex.sets}
-                onChange={(e) => updateExercise(sIdx, eIdx, { sets: Number(e.target.value) })}
+                onChange={(e) => updateExercise(sIdx, eIdx, { sets: Math.max(1, Number(e.target.value) || 1) })}
                 aria-label="Sets"
               />
               <input
                 style={{ ...S.textInput, textAlign: 'center' }}
                 type="number"
+                inputMode="numeric"
+                min="1"
                 value={ex.reps}
-                onChange={(e) => updateExercise(sIdx, eIdx, { reps: Number(e.target.value) })}
+                onChange={(e) => updateExercise(sIdx, eIdx, { reps: Math.max(1, Number(e.target.value) || 1) })}
                 aria-label="Reps"
               />
               <input
                 style={{ ...S.textInput, textAlign: 'center' }}
                 type="number"
+                inputMode="decimal"
+                min="0"
                 value={ex.default_weight}
-                onChange={(e) => updateExercise(sIdx, eIdx, { default_weight: Number(e.target.value) })}
+                onChange={(e) => updateExercise(sIdx, eIdx, { default_weight: Math.max(0, Number(e.target.value) || 0) })}
                 aria-label="Default weight"
               />
               <button
-                style={{ ...S.btnGhost, padding: '4px', color: 'var(--muted)' }}
+                style={{
+                  ...S.btnGhost, padding: '0',
+                  color: 'var(--muted)', minHeight: '44px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
                 onClick={() => removeExercise(sIdx, eIdx)}
                 aria-label="Remove exercise"
               >×</button>
