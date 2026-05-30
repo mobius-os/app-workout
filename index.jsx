@@ -1093,11 +1093,17 @@ function LineChart({ points }) {
   const toY = (y) => H - pad - ((y - minY) / yRange) * (H - 2 * pad)
   const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(i)} ${toY(p.weight)}`).join(' ')
 
+  const first = points[0].weight
+  const last = points[points.length - 1].weight
+  const delta = last - first
+
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
       style={{ width: '100%', height: 'auto', color: 'var(--accent)' }}
       preserveAspectRatio="none"
+      role="img"
+      aria-label={`Top-set trend: ${first}kg to ${last}kg over ${points.length} sessions (${delta >= 0 ? '+' : ''}${delta}kg)`}
     >
       {/* Baseline at min — gives the rough scale a visual floor. */}
       <line
@@ -1153,12 +1159,15 @@ function Heatmap({ history }) {
   const cell = 11, gap = 2
   const W = 53 * (cell + gap)
   const H = 7 * (cell + gap)
+  const sessionCount = sessionDays.size
 
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
       style={S.heatmap}
       preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label={`Activity heatmap: ${sessionCount} day${sessionCount === 1 ? '' : 's'} with logged sessions in the last 53 weeks`}
     >
       {weeks.map((week, wi) => week.map((d, di) => (
         <rect
@@ -1330,7 +1339,7 @@ export default function App({ appId, token }) {
         {loadErr && (
           <div style={{ ...S.card, borderColor: 'var(--accent)' }}>
             <p style={{ ...S.cardSub, margin: 0 }}>
-              Couldn’t load saved state — showing starter programs.
+              Couldn't load saved state — showing starter programs.
               Your sessions will save once the connection is back.
             </p>
           </div>
@@ -1340,16 +1349,31 @@ export default function App({ appId, token }) {
         {tab === 'history' && <HistoryTab state={state} />}
       </div>
 
-      <nav style={S.tabbar}>
-        <button style={S.tabBtn(tab === 'today')} onClick={() => setTab('today')}>
+      <nav style={S.tabbar} role="tablist" aria-label="Gym tabs">
+        <button
+          style={S.tabBtn(tab === 'today')}
+          onClick={() => setTab('today')}
+          role="tab"
+          aria-selected={tab === 'today'}
+        >
           <span style={S.tabIcon} aria-hidden>●</span>
           Today
         </button>
-        <button style={S.tabBtn(tab === 'programs')} onClick={() => setTab('programs')}>
+        <button
+          style={S.tabBtn(tab === 'programs')}
+          onClick={() => setTab('programs')}
+          role="tab"
+          aria-selected={tab === 'programs'}
+        >
           <span style={S.tabIcon} aria-hidden>▤</span>
           Programs
         </button>
-        <button style={S.tabBtn(tab === 'history')} onClick={() => setTab('history')}>
+        <button
+          style={S.tabBtn(tab === 'history')}
+          onClick={() => setTab('history')}
+          role="tab"
+          aria-selected={tab === 'history'}
+        >
           <span style={S.tabIcon} aria-hidden>▦</span>
           History
         </button>
