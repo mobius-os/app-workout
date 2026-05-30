@@ -614,6 +614,60 @@ function TodayTab({ state, onSaveSession }) {
   const sessionIdx = useMemo(() => pickTodaySession(state), [state])
   const session = program?.sessions?.[sessionIdx]
 
+  // moebius:nav-back integration — when the user swipes back / presses
+  // the device back button mid-session, the shell hands the back-press
+  // to us via this event. We close the logger instead of dismissing
+  // the whole gym app. Same protocol prod's klix-filter uses.
+  useEffect(() => {
+    function onMessage(event) {
+      if (event.origin !== window.location.origin) return
+      if (event.data?.type === 'moebius:nav-back') {
+        setLogging(false)
+      }
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+
+  // openLogger / closeLogger keep our state and the shell's
+  // back-sentinel in lock-step. nav-push is async with an ack timeout
+  // so the user isn't stuck if an older shell doesn't respond.
+  const openLogger = useCallback(async () => {
+    const requestId = `np-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    try {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          window.removeEventListener('message', onAck)
+          reject(new Error('nav-push timeout'))
+        }, 5000)
+        function onAck(event) {
+          if (event.origin !== window.location.origin) return
+          if (event.data?.requestId !== requestId) return
+          if (event.data.type === 'moebius:nav-push-ack') {
+            clearTimeout(timer); window.removeEventListener('message', onAck); resolve()
+          } else if (event.data.type === 'moebius:nav-push-rejected') {
+            clearTimeout(timer); window.removeEventListener('message', onAck); reject()
+          }
+        }
+        window.addEventListener('message', onAck)
+        window.parent.postMessage(
+          { type: 'moebius:nav-push', label: 'gym-session', requestId },
+          window.location.origin,
+        )
+      })
+    } catch {
+      // Older shell — fall back to opening without the sentinel.
+    }
+    setLogging(true)
+  }, [])
+
+  const closeLogger = useCallback(() => {
+    window.parent.postMessage(
+      { type: 'moebius:nav-pop' }, window.location.origin,
+    )
+    setLogging(false)
+  }, [])
+
   if (!program || !session) {
     return (
       <div style={S.empty}>
@@ -628,8 +682,8 @@ function TodayTab({ state, onSaveSession }) {
         session={session}
         programId={state.active_program_id}
         sessionIdx={sessionIdx}
-        onSave={(row) => { onSaveSession(row); setLogging(false) }}
-        onCancel={() => setLogging(false)}
+        onSave={(row) => { onSaveSession(row); closeLogger() }}
+        onCancel={closeLogger}
       />
     )
   }
@@ -662,7 +716,7 @@ function TodayTab({ state, onSaveSession }) {
           ))}
         </div>
         <div style={{ height: '14px' }} />
-        <button style={S.btnPrimary} onClick={() => setLogging(true)}>
+        <button style={S.btnPrimary} onClick={openLogger}>
           {alreadyToday ? 'Log another session' : 'Start session'}
         </button>
         {alreadyToday && (
