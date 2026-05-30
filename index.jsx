@@ -37,21 +37,39 @@ function makeStore(appId, token) {
     } catch { return null }
   }
 
+  // Returns the shim's {synced:true} | {queued:true} when the runtime is
+  // present so callers can branch their UI ("Saved" vs "Pending"). When
+  // the runtime isn't loaded we fall back to a direct PUT and return a
+  // synthetic {synced:true} on success so the caller sees the same shape.
   async function set(path, value) {
     const ms = (typeof window !== 'undefined') ? window.mobius?.storage : null
     if (ms && typeof ms.set === 'function') {
       try { return await ms.set(path, value) } catch { /* fall through */ }
     }
     try {
-      await fetch(`${base}/${path}`, {
+      const r = await fetch(`${base}/${path}`, {
         method: 'PUT',
         headers: { ...auth, 'Content-Type': 'application/json' },
         body: JSON.stringify(value),
       })
-    } catch { /* swallow — caller already updated optimistic state */ }
+      if (r.ok) return { synced: true }
+      return { queued: false, error: true }
+    } catch {
+      // No runtime + no network = caller has no offline mirror; best we
+      // can do is signal failure so the indicator can flag it.
+      return { queued: false, error: true }
+    }
   }
 
-  return { get, set }
+  async function pendingCount() {
+    const ms = (typeof window !== 'undefined') ? window.mobius?.storage : null
+    if (ms && typeof ms.pendingCount === 'function') {
+      try { return await ms.pendingCount() } catch { return 0 }
+    }
+    return 0
+  }
+
+  return { get, set, pendingCount }
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +343,29 @@ const S = {
   modalTitle: { fontSize: '16px', fontWeight: 700, margin: '0 0 6px' },
   modalBody: { fontSize: '13px', color: 'var(--muted)', margin: '0 0 16px', lineHeight: 1.5 },
   modalBtns: { display: 'flex', gap: '8px', justifyContent: 'flex-end' },
+
+  // Sync-status pill — sits in the header, also passed into the session
+  // logger so it's visible while logging. Three states: idle ("Saved"),
+  // pending writes ("Offline · N pending" or "Syncing · N"), and a
+  // transient "Saving…" right after a write resolves. Auto-hides itself
+  // when there's nothing to say (online + 0 pending + not flashing).
+  pill: (variant) => ({
+    fontSize: '11px', fontWeight: 600,
+    padding: '4px 10px', borderRadius: '999px',
+    letterSpacing: '0.2px',
+    background: variant === 'offline'
+      ? 'var(--surface2, var(--surface))'
+      : variant === 'pending'
+        ? 'var(--surface2, var(--surface))'
+        : 'transparent',
+    border: `1px solid ${
+      variant === 'offline' ? 'var(--accent)'
+        : variant === 'pending' ? 'var(--border)'
+        : 'var(--border)'
+    }`,
+    color: variant === 'offline' ? 'var(--accent)' : 'var(--muted)',
+    whiteSpace: 'nowrap',
+  }),
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +418,113 @@ function pickTodaySession(state) {
 }
 
 // ---------------------------------------------------------------------------
+// Sync status — observes the Möbius offline runtime and exposes a {state,
+// pending, online} snapshot the UI can paint as a pill.
+//
+// Three triggers refresh the count:
+//   1. Caller pokes `bump()` after every write resolves. The {synced,
+//      queued} hint from store.set is recorded so we can flash "Saved" /
+//      "Pending" right after a save without waiting for the next poll.
+//   2. A 10s background poll — catches drains the runtime did on
+//      `online`/`focus`/`pageshow`/`visibilitychange` that we didn't
+//      otherwise observe.
+//   3. `online` / `offline` events on `window` — flip the connectivity
+//      half of state immediately.
+// ---------------------------------------------------------------------------
+
+function useSyncStatus(store) {
+  const [pending, setPending] = useState(0)
+  const [online, setOnline] = useState(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true,
+  )
+  // Transient `flash` overrides the steady-state pill for ~1.2s after a
+  // write resolves. Lets the user see "Saved" briefly even when nothing
+  // is queued.
+  const [flash, setFlash] = useState(null)
+  // Tracks the active flash-clear timer so successive writes don't leave
+  // stale timeouts racing each other, and so unmount can cancel cleanly.
+  const flashTimerRef = useRef(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const n = await store.pendingCount()
+      setPending(n)
+    } catch { /* leave previous count */ }
+  }, [store])
+
+  useEffect(() => {
+    refresh()
+    const id = setInterval(refresh, 10_000)
+    function onOnline() { setOnline(true); refresh() }
+    function onOffline() { setOnline(false); refresh() }
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    return () => {
+      clearInterval(id)
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+    }
+  }, [refresh])
+
+  // Caller hands us the result of a store.set so we can flash + refresh
+  // the count immediately.
+  const bump = useCallback((result) => {
+    if (result && result.queued) setFlash('pending')
+    else if (result && result.synced) setFlash('saved')
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = setTimeout(() => {
+      setFlash(null)
+      flashTimerRef.current = null
+    }, 1200)
+    refresh()
+  }, [refresh])
+
+  return { pending, online, flash, bump, refresh }
+}
+
+function SyncPill({ status }) {
+  const { pending, online, flash } = status
+  // Decide what to say. Offline > pending > flash > nothing.
+  let label, variant
+  if (!online && pending > 0) {
+    label = `Offline · ${pending} pending`
+    variant = 'offline'
+  } else if (!online) {
+    label = 'Offline'
+    variant = 'offline'
+  } else if (pending > 0) {
+    label = `Syncing · ${pending}`
+    variant = 'pending'
+  } else if (flash === 'saved') {
+    label = 'Saved'
+    variant = 'saved'
+  } else if (flash === 'pending') {
+    label = 'Queued'
+    variant = 'pending'
+  } else {
+    // Idle + online + no pending — render nothing so the header doesn't
+    // get a persistent "Saved" sticker that means nothing after the first
+    // minute.
+    return null
+  }
+  return (
+    <span
+      style={S.pill(variant)}
+      role="status"
+      aria-live="polite"
+      aria-label={
+        variant === 'offline'
+          ? `Offline${pending > 0 ? `, ${pending} pending` : ''}`
+          : label
+      }
+    >
+      {label}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Session logger — the core interactive surface.
 // ---------------------------------------------------------------------------
 //
@@ -385,7 +533,7 @@ function pickTodaySession(state) {
 // timer; the timer is just a visual hint, no enforcement.
 // ---------------------------------------------------------------------------
 
-function SessionLogger({ session, programId, sessionIdx, onSave, onCancel }) {
+function SessionLogger({ session, programId, sessionIdx, onSave, onCancel, syncStatus }) {
   // Hydrate one editable row per planned set, pre-filled with the template's
   // reps/weight so the user only adjusts when they hit a different number.
   const initial = useMemo(() => session.exercises.map(ex => ({
@@ -511,7 +659,13 @@ function SessionLogger({ session, programId, sessionIdx, onSave, onCancel }) {
         )}
       </div>
 
-      <h2 style={{ ...S.cardTitle, marginBottom: '14px' }}>{session.name}</h2>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: '10px', marginBottom: '14px',
+      }}>
+        <h2 style={{ ...S.cardTitle, margin: 0 }}>{session.name}</h2>
+        {syncStatus && <SyncPill status={syncStatus} />}
+      </div>
 
       {exercises.map((ex, eIdx) => (
         <div key={eIdx} style={S.exerciseBlock}>
@@ -608,7 +762,7 @@ function SessionLogger({ session, programId, sessionIdx, onSave, onCancel }) {
 // Today tab — preview the upcoming session, then hand off to SessionLogger.
 // ---------------------------------------------------------------------------
 
-function TodayTab({ state, onSaveSession }) {
+function TodayTab({ state, onSaveSession, syncStatus }) {
   const [logging, setLogging] = useState(false)
   const program = state.programs?.[state.active_program_id]
   const sessionIdx = useMemo(() => pickTodaySession(state), [state])
@@ -684,6 +838,7 @@ function TodayTab({ state, onSaveSession }) {
         sessionIdx={sessionIdx}
         onSave={(row) => { onSaveSession(row); closeLogger() }}
         onCancel={closeLogger}
+        syncStatus={syncStatus}
       />
     )
   }
@@ -1328,11 +1483,19 @@ export default function App({ appId, token }) {
   const store = useMemo(() => makeStore(appId, token), [appId, token])
   const [tab, setTab] = useState('today')
   const [state, setState] = useState(null)
-  const [loadErr, setLoadErr] = useState(false)
+  // `bootStatus` distinguishes the three first-paint outcomes:
+  //  - 'ready': state.json arrived (canonical or fallback usable)
+  //  - 'first-boot-offline': no cached state AND offline. We can't seed
+  //    the starter pack from disk because storage.get returns null
+  //    offline; the user needs one online tick to hydrate.
+  //  - 'load-fail-online': online but get() returned null (404, server
+  //    error, racing seed). Fall back to FALLBACK_STATE and warn.
+  const [bootStatus, setBootStatus] = useState('loading')
+  const syncStatus = useSyncStatus(store)
 
-  // Initial load. `state.json` is seeded by the manifest, so the first
-  // mount almost always lands a real object — but we still tolerate
-  // failure (offline, racing seed) by falling back to FALLBACK_STATE.
+  // Initial load. We read state.json exactly once on mount — subsequent
+  // reads all go through React state. The dep is [store], which is
+  // memoized on [appId, token] so it's stable for the session.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -1340,26 +1503,65 @@ export default function App({ appId, token }) {
       if (cancelled) return
       if (loaded && typeof loaded === 'object' && loaded.programs) {
         setState(loaded)
-      } else {
-        setState(FALLBACK_STATE)
-        setLoadErr(!loaded)
+        setBootStatus('ready')
+        return
       }
+      // No state and we're offline → we genuinely have nothing to show.
+      // The manifest's storage_seeds.state.json runs server-side, so
+      // until the first online fetch lands the user can't see the
+      // starter pack. Render a friendly first-boot screen instead of
+      // misleading them with FALLBACK_STATE (which would let them log
+      // sessions into a write that may never reconcile with a real seed).
+      if (!navigator.onLine) {
+        setBootStatus('first-boot-offline')
+        return
+      }
+      setState(FALLBACK_STATE)
+      setBootStatus('load-fail-online')
     })()
     return () => { cancelled = true }
   }, [store])
 
-  // Updater wrapper: optimistic local update + fire-and-forget write.
-  // Persistence races are fine here — single user, one device per session,
-  // no multi-writer conflicts. The offline runtime handles outbox replay
-  // when present.
+  // When we boot offline-empty, listen for online to re-attempt the
+  // load. One-shot — once we land state, the effect above won't re-run
+  // (store is stable), so we have to manually re-fetch here.
+  useEffect(() => {
+    if (bootStatus !== 'first-boot-offline') return
+    let cancelled = false
+    async function tryLoad() {
+      if (!navigator.onLine) return
+      const loaded = await store.get('state.json')
+      if (cancelled) return
+      if (loaded && typeof loaded === 'object' && loaded.programs) {
+        setState(loaded)
+        setBootStatus('ready')
+      }
+    }
+    window.addEventListener('online', tryLoad)
+    return () => {
+      cancelled = true
+      window.removeEventListener('online', tryLoad)
+    }
+  }, [bootStatus, store])
+
+  // Updater wrapper: optimistic local update + write through the shim.
+  // We await the shim so we can record its {synced|queued} hint for the
+  // pill, but the React state is already updated by the time set()
+  // resolves — the UI never waits. Depend on the stable `bump` callback
+  // rather than the whole syncStatus object so this callback's identity
+  // doesn't churn each render (would force props-equality recomputes in
+  // every child tab).
+  const bumpSync = syncStatus.bump
   const updateState = useCallback((updater) => {
     setState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater
-      // Don't await — the UI shouldn't block on persistence.
-      store.set('state.json', next)
+      ;(async () => {
+        const result = await store.set('state.json', next)
+        bumpSync(result)
+      })()
       return next
     })
-  }, [store])
+  }, [store, bumpSync])
 
   const saveSession = useCallback((row) => {
     updateState(prev => ({
@@ -1368,10 +1570,34 @@ export default function App({ appId, token }) {
     }))
   }, [updateState])
 
-  if (state === null) {
+  if (bootStatus === 'loading') {
     return (
       <div style={S.root}>
         <div style={S.loading}>Loading…</div>
+      </div>
+    )
+  }
+
+  if (bootStatus === 'first-boot-offline') {
+    return (
+      <div style={S.root}>
+        <div style={S.header}>
+          <div>
+            <h1 style={S.title}>Gym</h1>
+            <p style={S.subtitle}>Offline first-boot.</p>
+          </div>
+          <SyncPill status={syncStatus} />
+        </div>
+        <div style={S.scroll}>
+          <div style={{ ...S.card, borderColor: 'var(--accent)' }}>
+            <h2 style={S.cardTitle}>Connect once to seed</h2>
+            <p style={{ ...S.cardSub, margin: 0 }}>
+              The starter programs haven't downloaded yet. Reconnect to
+              Möbius once — the app will pick up automatically — then
+              everything works offline from then on.
+            </p>
+          </div>
+        </div>
       </div>
     )
   }
@@ -1387,10 +1613,11 @@ export default function App({ appId, token }) {
             {tab === 'history' && 'Track progress.'}
           </p>
         </div>
+        <SyncPill status={syncStatus} />
       </div>
 
       <div style={S.scroll}>
-        {loadErr && (
+        {bootStatus === 'load-fail-online' && (
           <div style={{ ...S.card, borderColor: 'var(--accent)' }}>
             <p style={{ ...S.cardSub, margin: 0 }}>
               Couldn't load saved state — showing starter programs.
@@ -1398,7 +1625,13 @@ export default function App({ appId, token }) {
             </p>
           </div>
         )}
-        {tab === 'today' && <TodayTab state={state} onSaveSession={saveSession} />}
+        {tab === 'today' && (
+          <TodayTab
+            state={state}
+            onSaveSession={saveSession}
+            syncStatus={syncStatus}
+          />
+        )}
         {tab === 'programs' && <ProgramsTab state={state} onState={updateState} />}
         {tab === 'history' && <HistoryTab state={state} />}
       </div>
