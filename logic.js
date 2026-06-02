@@ -12,17 +12,21 @@
 // The 10-category enum. The LLM picks the KEY; the app owns the icon + color
 // so a model that hallucinates an emoji can't drift the look of the app. Any
 // unrecognized key the model returns collapses to `other` at normalize time.
+//
+// `icon` is a Tabler icon KEY (e.g. 'barbell'), not a glyph: logic.js stays
+// pure (no JSX/SVG), so the rendering layer (index.jsx) maps the key to inline
+// Tabler SVG markup. The keys below all resolve to real Tabler outline icons.
 export const CATEGORIES = {
-  strength: { label: 'Strength', icon: '🏋️', color: '#6366f1', family: 'strength' },
-  cardio: { label: 'Cardio', icon: '❤️', color: '#ef4444', family: 'cardio' },
-  running: { label: 'Running', icon: '🏃', color: '#f97316', family: 'cardio' },
-  cycling: { label: 'Cycling', icon: '🚴', color: '#14b8a6', family: 'cardio' },
-  swimming: { label: 'Swimming', icon: '🏊', color: '#06b6d4', family: 'cardio' },
-  rowing: { label: 'Rowing', icon: '🚣', color: '#3b82f6', family: 'cardio' },
-  hiking: { label: 'Hiking', icon: '🥾', color: '#10b981', family: 'cardio' },
-  yoga: { label: 'Yoga', icon: '🧘', color: '#8b5cf6', family: 'other' },
-  sport: { label: 'Sport', icon: '⚽', color: '#ec4899', family: 'other' },
-  other: { label: 'Other', icon: '✨', color: '#a1a1aa', family: 'other' },
+  strength: { label: 'Strength', icon: 'barbell', color: '#6366f1', family: 'strength' },
+  cardio: { label: 'Cardio', icon: 'heartbeat', color: '#ef4444', family: 'cardio' },
+  running: { label: 'Running', icon: 'run', color: '#f97316', family: 'cardio' },
+  cycling: { label: 'Cycling', icon: 'bike', color: '#14b8a6', family: 'cardio' },
+  swimming: { label: 'Swimming', icon: 'swimming', color: '#06b6d4', family: 'cardio' },
+  rowing: { label: 'Rowing', icon: 'kayak', color: '#3b82f6', family: 'cardio' },
+  hiking: { label: 'Hiking', icon: 'mountain', color: '#10b981', family: 'cardio' },
+  yoga: { label: 'Yoga', icon: 'yoga', color: '#8b5cf6', family: 'other' },
+  sport: { label: 'Sport', icon: 'ball-football', color: '#ec4899', family: 'other' },
+  other: { label: 'Other', icon: 'sparkles', color: '#a1a1aa', family: 'other' },
 }
 
 export const CATEGORY_KEYS = Object.keys(CATEGORIES)

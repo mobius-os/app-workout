@@ -24,17 +24,21 @@ import {
 // The 10-category enum. The LLM picks the KEY; the app owns the icon + color
 // so a model that hallucinates an emoji can't drift the look of the app. Any
 // unrecognized key the model returns collapses to `other` at normalize time.
+//
+// `icon` is a Tabler icon KEY (e.g. 'barbell'), not a glyph: logic.js stays
+// pure (no JSX/SVG), so the rendering layer (index.jsx) maps the key to inline
+// Tabler SVG markup. The keys below all resolve to real Tabler outline icons.
 const CATEGORIES = {
-  strength: { label: 'Strength', icon: '🏋️', color: '#6366f1', family: 'strength' },
-  cardio: { label: 'Cardio', icon: '❤️', color: '#ef4444', family: 'cardio' },
-  running: { label: 'Running', icon: '🏃', color: '#f97316', family: 'cardio' },
-  cycling: { label: 'Cycling', icon: '🚴', color: '#14b8a6', family: 'cardio' },
-  swimming: { label: 'Swimming', icon: '🏊', color: '#06b6d4', family: 'cardio' },
-  rowing: { label: 'Rowing', icon: '🚣', color: '#3b82f6', family: 'cardio' },
-  hiking: { label: 'Hiking', icon: '🥾', color: '#10b981', family: 'cardio' },
-  yoga: { label: 'Yoga', icon: '🧘', color: '#8b5cf6', family: 'other' },
-  sport: { label: 'Sport', icon: '⚽', color: '#ec4899', family: 'other' },
-  other: { label: 'Other', icon: '✨', color: '#a1a1aa', family: 'other' },
+  strength: { label: 'Strength', icon: 'barbell', color: '#6366f1', family: 'strength' },
+  cardio: { label: 'Cardio', icon: 'heartbeat', color: '#ef4444', family: 'cardio' },
+  running: { label: 'Running', icon: 'run', color: '#f97316', family: 'cardio' },
+  cycling: { label: 'Cycling', icon: 'bike', color: '#14b8a6', family: 'cardio' },
+  swimming: { label: 'Swimming', icon: 'swimming', color: '#06b6d4', family: 'cardio' },
+  rowing: { label: 'Rowing', icon: 'kayak', color: '#3b82f6', family: 'cardio' },
+  hiking: { label: 'Hiking', icon: 'mountain', color: '#10b981', family: 'cardio' },
+  yoga: { label: 'Yoga', icon: 'yoga', color: '#8b5cf6', family: 'other' },
+  sport: { label: 'Sport', icon: 'ball-football', color: '#ec4899', family: 'other' },
+  other: { label: 'Other', icon: 'sparkles', color: '#a1a1aa', family: 'other' },
 }
 
 const CATEGORY_KEYS = Object.keys(CATEGORIES)
@@ -498,6 +502,107 @@ function summarizeMetrics(entry) {
   return parts.join(' · ')
 }
 // ===== INLINE-LOGIC END =====
+
+// ---------------------------------------------------------------------------
+// Category icons — the rendering half of CATEGORIES. logic.js stores a Tabler
+// icon KEY per category (it stays JSX-free); this map turns that key into the
+// inline SVG inner markup, copied verbatim from Tabler's outline set. Drawn
+// with the shared <SportIcon> below so every render site picks up the same
+// stroke/sizing.
+// Icons: Tabler Icons (MIT) — https://tabler.io/icons
+const ICONS = {
+  barbell: (
+    <>
+      <path d="M2 12h1" />
+      <path d="M6 8h-2a1 1 0 0 0 -1 1v6a1 1 0 0 0 1 1h2" />
+      <path d="M6 7v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1 -1v-10a1 1 0 0 0 -1 -1h-1a1 1 0 0 0 -1 1" />
+      <path d="M9 12h6" />
+      <path d="M15 7v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1 -1v-10a1 1 0 0 0 -1 -1h-1a1 1 0 0 0 -1 1" />
+      <path d="M18 8h2a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-2" />
+      <path d="M22 12h-1" />
+    </>
+  ),
+  heartbeat: (
+    <>
+      <path d="M19.5 13.572l-7.5 7.428l-2.896 -2.868m-6.117 -8.104a5 5 0 0 1 9.013 -3.022a5 5 0 1 1 7.5 6.572" />
+      <path d="M3 13h2l2 3l2 -6l1 3h3" />
+    </>
+  ),
+  run: (
+    <>
+      <path d="M11.007 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+      <path d="M4 17l5 1l.75 -1.5" />
+      <path d="M15 21v-4l-4 -3l1 -6" />
+      <path d="M7 12v-3l5 -1l3 3l3 1" />
+    </>
+  ),
+  bike: (
+    <>
+      <path d="M2 18a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
+      <path d="M16 18a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
+      <path d="M12 19v-4l-3 -3l5 -4l2 3h3" />
+      <path d="M13.007 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    </>
+  ),
+  swimming: (
+    <>
+      <path d="M15 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+      <path d="M6 11l4 -2l3.5 3l-1.5 2" />
+      <path d="M3 16.75a2.4 2.4 0 0 0 1 .25a2.4 2.4 0 0 0 2 -1a2.4 2.4 0 0 1 2 -1a2.4 2.4 0 0 1 2 1a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2 -1a2.4 2.4 0 0 1 2 -1a2.4 2.4 0 0 1 2 1a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 1 -.25" />
+    </>
+  ),
+  kayak: (
+    <>
+      <path d="M6.414 6.414a2 2 0 0 0 0 -2.828l-1.414 -1.414l-2.828 2.828l1.414 1.414a2 2 0 0 0 2.828 0" />
+      <path d="M17.586 17.586a2 2 0 0 0 0 2.828l1.414 1.414l2.828 -2.828l-1.414 -1.414a2 2 0 0 0 -2.828 0" />
+      <path d="M6.5 6.5l11 11" />
+      <path d="M22 2.5c-9.983 2.601 -17.627 7.952 -20 19.5c9.983 -2.601 17.627 -7.952 20 -19.5" />
+      <path d="M6.5 12.5l5 5" />
+      <path d="M12.5 6.5l5 5" />
+    </>
+  ),
+  mountain: (
+    <>
+      <path d="M3 20h18l-6.921 -14.612a2.3 2.3 0 0 0 -4.158 0l-6.921 14.612" />
+      <path d="M7.5 11l2 2.5l2.5 -2.5l2 3l2.5 -2" />
+    </>
+  ),
+  yoga: (
+    <>
+      <path d="M4 20h4l1.5 -3" />
+      <path d="M17 20l-1 -5h-5l1 -7" />
+      <path d="M4 10l4 -1l4 -1l4 1.5l4 1.5" />
+      <path d="M10.007 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+    </>
+  ),
+  'ball-football': (
+    <>
+      <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
+      <path d="M12 7l4.76 3.45l-1.76 5.55h-6l-1.76 -5.55l4.76 -3.45" />
+      <path d="M12 7v-4m3 13l2.5 3m-.74 -8.55l3.74 -1.45m-11.44 7.05l-2.56 2.95m.74 -8.55l-3.74 -1.45" />
+    </>
+  ),
+  sparkles: (
+    <>
+      <path d="M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m-7 12a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6" />
+    </>
+  ),
+}
+
+// Renders a category's Tabler icon. `name` is the CATEGORIES[k].icon key; an
+// unknown key falls back to the neutral `sparkles` glyph so a future category
+// added in logic.js without a matching ICONS entry still draws something.
+function SportIcon({ name, color, size = 20 }) {
+  return (
+    <svg
+      viewBox="0 0 24 24" width={size} height={size}
+      fill="none" stroke={color || 'currentColor'} strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden
+    >
+      {ICONS[name] || ICONS.sparkles}
+    </svg>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Storage layer — two paths into the same place:
@@ -1018,7 +1123,7 @@ function ConfirmCard({ draft, ambiguous, clarification, onCommit, onCancel }) {
             aria-label={`Category ${CATEGORIES[k].label}`}
             aria-pressed={k === category}
           >
-            <span aria-hidden>{CATEGORIES[k].icon}</span>{CATEGORIES[k].label}
+            <SportIcon name={CATEGORIES[k].icon} color={CATEGORIES[k].color} size={16} />{CATEGORIES[k].label}
           </button>
         ))}
       </div>
@@ -1185,7 +1290,9 @@ function EntryCard({ entry, onDelete }) {
   const time = new Date(entry.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   return (
     <div style={S.entryCard}>
-      <div style={S.entryIcon(cat.color)} aria-hidden>{entry.icon || cat.icon}</div>
+      <div style={S.entryIcon(cat.color)} aria-hidden>
+        <SportIcon name={entry.icon || cat.icon} color={cat.color} />
+      </div>
       <div style={S.entryBody}>
         <div style={S.entryTop}>
           <h4 style={S.entryName}>{entry.activity}</h4>

@@ -68,7 +68,7 @@ test('normalizeEntry maps a strength parse to SI-stored sets', () => {
   const e = normalizeEntry(parsed, { ts: 1_700_000_000_000, raw: 'did 1 set of deadlift 100kg x8' })
   assert.equal(e.category, 'strength')
   assert.equal(e.activity, 'Deadlift')
-  assert.equal(e.icon, '🏋️') // app owns the icon
+  assert.equal(e.icon, 'barbell') // app owns the icon (Tabler key, not a glyph)
   assert.equal(e.metrics.sets.length, 1)
   assert.equal(e.metrics.sets[0].weight_kg, 100)
   assert.equal(e.metrics.sets[0].reps, 8)
