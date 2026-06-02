@@ -1,0 +1,11 @@
+{
+  "name": "app-gym",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dev/test harness only — Mobius installs index.jsx as a single compiled module. This package.json exists so logic.js is ESM-resolved for node --test and so build-entry.mjs can inline it.",
+  "scripts": {
+    "build": "node build-entry.mjs",
+    "test": "node build-entry.mjs && node --test"
+  }
+}

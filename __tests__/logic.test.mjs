@@ -1,0 +1,192 @@
+// node --test coverage for the pure logic. These prove everything downstream
+// of the LLM's JSON: the parsed→normalized mapping (strength + cardio/hiking),
+// session grouping by the 4h gap, and the Epley e1RM. The LLM call itself
+// can't be tested offline — these tests stand in a hand-written "parsed"
+// object for what the model would return.
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+
+import {
+  normalizeEntry, assignSession, currentSession, groupSessions,
+  epley1RM, strengthPRs, cardioBests, migrateLegacyState,
+  SESSION_GAP_MS, toKg, summarizeMetrics,
+} from '../logic.js'
+import { buildEntry } from '../build-entry.mjs'
+
+const here = dirname(fileURLToPath(import.meta.url))
+
+test('normalizeEntry maps a strength parse to SI-stored sets', () => {
+  const parsed = {
+    category: 'strength',
+    activity: 'Deadlift',
+    metrics: { sets: [{ weight: 100, reps: 8, unit: 'kg' }] },
+  }
+  const e = normalizeEntry(parsed, { ts: 1_700_000_000_000, raw: 'did 1 set of deadlift 100kg x8' })
+  assert.equal(e.category, 'strength')
+  assert.equal(e.activity, 'Deadlift')
+  assert.equal(e.icon, '🏋️') // app owns the icon
+  assert.equal(e.metrics.sets.length, 1)
+  assert.equal(e.metrics.sets[0].weight_kg, 100)
+  assert.equal(e.metrics.sets[0].reps, 8)
+  assert.equal(e.metrics.sets[0].unit, 'kg')
+  assert.ok(e.id && e.localDate && e.confirmed === true)
+})
+
+test('normalizeEntry converts lb to kg on the way in', () => {
+  const parsed = {
+    category: 'strength', activity: 'Bench',
+    metrics: { sets: [{ weight: 225, reps: 5, unit: 'lb' }] },
+  }
+  const e = normalizeEntry(parsed, { ts: 1 })
+  // 225 lb ≈ 102.06 kg
+  assert.ok(Math.abs(e.metrics.sets[0].weight_kg - 102.06) < 0.05)
+  assert.equal(e.metrics.sets[0].unit, 'lb') // display unit preserved
+})
+
+test('normalizeEntry maps a hiking parse to cardio-family SI metrics', () => {
+  const parsed = {
+    category: 'hiking',
+    activity: 'Hike',
+    metrics: {
+      duration: { value: 8, unit: 'h' },
+      location: 'Hawaii',
+      elevation: { value: 1.2, unit: 'km' },
+    },
+  }
+  const e = normalizeEntry(parsed, { ts: 2, raw: 'hiked 8h in Hawaii' })
+  assert.equal(e.category, 'hiking')
+  assert.equal(e.metrics.duration_s, 8 * 3600)
+  assert.equal(e.metrics.location, 'Hawaii')
+  assert.equal(e.metrics.elevation_m, 1200)
+  assert.equal(e.metrics.distance_m, null)
+  assert.match(summarizeMetrics(e), /8h/)
+  assert.match(summarizeMetrics(e), /Hawaii/)
+})
+
+test('normalizeEntry maps a running parse with distance + duration', () => {
+  const parsed = {
+    category: 'running', activity: 'Run',
+    metrics: { distance: { value: 5, unit: 'km' }, duration: { value: 24, unit: 'min' } },
+  }
+  const e = normalizeEntry(parsed, { ts: 3 })
+  assert.equal(e.metrics.distance_m, 5000)
+  assert.equal(e.metrics.duration_s, 24 * 60)
+})
+
+test('unknown category collapses to other', () => {
+  const e = normalizeEntry({ category: 'quidditch', activity: 'Match', metrics: {} }, { ts: 4 })
+  assert.equal(e.category, 'other')
+})
+
+test('groupSessions clusters entries within the 4h gap and splits beyond it', () => {
+  const base = 1_700_000_000_000
+  const entries = [
+    { id: 'a', ts: base, localDate: '2025-01-01', sessionId: 's-1', category: 'strength', metrics: { sets: [] }, activity: 'A' },
+    { id: 'b', ts: base + 30 * 60 * 1000, localDate: '2025-01-01', sessionId: 's-1', category: 'strength', metrics: { sets: [] }, activity: 'B' },
+    // 5h later → new session
+    { id: 'c', ts: base + 5 * 60 * 60 * 1000, localDate: '2025-01-01', sessionId: 's-2', category: 'cardio', metrics: {}, activity: 'C' },
+  ]
+  const sessions = groupSessions(entries)
+  assert.equal(sessions.length, 2)
+  assert.equal(sessions[0].entries.length, 2)
+  assert.equal(sessions[1].entries.length, 1)
+})
+
+test('assignSession reuses the open session for a follow-up within the gap', () => {
+  const base = 1_700_000_000_000
+  const entries = [
+    { id: 'a', ts: base, sessionId: 's-1', category: 'strength', metrics: { sets: [] }, localDate: '2025-01-01', activity: 'Deadlift' },
+  ]
+  // "another set with 90", 20 min later → same session.
+  const sid = assignSession(entries, base + 20 * 60 * 1000)
+  assert.equal(sid, 's-1')
+  // ... but 5h later → a fresh session.
+  const sid2 = assignSession(entries, base + 5 * 60 * 60 * 1000)
+  assert.notEqual(sid2, 's-1')
+})
+
+test('currentSession returns the open session within the gap, null past it', () => {
+  const base = 1_700_000_000_000
+  const entries = [
+    { id: 'a', ts: base, sessionId: 's-1', category: 'strength', metrics: { sets: [] }, localDate: '2025-01-01', activity: 'Deadlift' },
+  ]
+  assert.ok(currentSession(entries, base + 60 * 1000)) // 1 min later: open
+  assert.equal(currentSession(entries, base + SESSION_GAP_MS + 1), null) // past gap
+})
+
+test('epley1RM matches the Epley formula and ranks reps over a single', () => {
+  assert.equal(epley1RM(100, 1), 100)
+  // 100 * (1 + 5/30) = 116.67 → 116.7
+  assert.equal(epley1RM(100, 5), 116.7)
+  // 100×5 outranks 110×1 (110 e1RM)
+  assert.ok(epley1RM(100, 5) > epley1RM(110, 1))
+  assert.equal(epley1RM(0, 5), 0)
+  assert.equal(epley1RM(100, 0), 0)
+})
+
+test('strengthPRs ranks the best e1RM per activity', () => {
+  const entries = [
+    normalizeEntry({ category: 'strength', activity: 'Squat', metrics: { sets: [{ weight: 100, reps: 5, unit: 'kg' }] } }, { ts: 1 }),
+    normalizeEntry({ category: 'strength', activity: 'Squat', metrics: { sets: [{ weight: 110, reps: 1, unit: 'kg' }] } }, { ts: 2 }),
+  ]
+  const prs = strengthPRs(entries)
+  assert.equal(prs.length, 1)
+  assert.equal(prs[0].activity, 'Squat')
+  // 100×5 (116.7) beats 110×1 (110)
+  assert.equal(prs[0].weight_kg, 100)
+  assert.equal(prs[0].reps, 5)
+})
+
+test('cardioBests reports max distance/duration per activity', () => {
+  const entries = [
+    normalizeEntry({ category: 'running', activity: 'Run', metrics: { distance: { value: 5, unit: 'km' }, duration: { value: 24, unit: 'min' } } }, { ts: 1 }),
+    normalizeEntry({ category: 'running', activity: 'Run', metrics: { distance: { value: 10, unit: 'km' }, duration: { value: 50, unit: 'min' } } }, { ts: 2 }),
+  ]
+  const bests = cardioBests(entries)
+  assert.equal(bests.length, 1)
+  assert.equal(bests[0].maxDistance_m, 10000)
+  assert.equal(bests[0].maxDuration_s, 3000)
+})
+
+test('migrateLegacyState turns history sets into strength entries', () => {
+  const legacy = {
+    programs: { ppl6: { name: 'x', sessions: [] } },
+    history: [
+      {
+        date: '2025-01-01',
+        sets: [
+          { exercise: 'Deadlift', weight: 100, reps: 5 },
+          { exercise: 'Deadlift', weight: 100, reps: 5 },
+          { exercise: 'Bench', weight: 60, reps: 8 },
+        ],
+      },
+    ],
+  }
+  const entries = migrateLegacyState(legacy)
+  // Two activities → two entries; Deadlift entry has 2 sets.
+  assert.equal(entries.length, 2)
+  const deadlift = entries.find((e) => e.activity === 'Deadlift')
+  assert.ok(deadlift)
+  assert.equal(deadlift.category, 'strength')
+  assert.equal(deadlift.metrics.sets.length, 2)
+  assert.equal(deadlift.localDate, '2025-01-01')
+  // Both entries share the session reconstructed from the row date.
+  assert.equal(entries[0].sessionId, entries[1].sessionId)
+})
+
+test('toKg leaves kg untouched, converts lb', () => {
+  assert.equal(toKg(100, 'kg'), 100)
+  assert.ok(Math.abs(toKg(220.46, 'lb') - 100) < 0.05)
+})
+
+test('index.jsx inlined logic block is in sync with logic.js', () => {
+  // Guard against a forgotten `node build-entry.mjs`: regenerating from the
+  // current logic.js must be a no-op against the committed index.jsx.
+  const indexSource = readFileSync(join(here, '..', 'index.jsx'), 'utf8')
+  const logicSource = readFileSync(join(here, '..', 'logic.js'), 'utf8')
+  const rebuilt = buildEntry(indexSource, logicSource)
+  assert.equal(rebuilt, indexSource, 'index.jsx logic block is stale — run `node build-entry.mjs`')
+})
