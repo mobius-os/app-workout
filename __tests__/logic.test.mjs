@@ -12,9 +12,50 @@ import { dirname, join } from 'node:path'
 import {
   normalizeEntry, assignSession, currentSession, groupSessions,
   epley1RM, strengthPRs, cardioBests, migrateLegacyState,
-  SESSION_GAP_MS, toKg, summarizeMetrics,
+  SESSION_GAP_MS, toKg, summarizeMetrics, extractFirstJsonObject,
 } from '../logic.js'
 import { buildEntry } from '../build-entry.mjs'
+
+// --- robustness against bad/odd LLM output (Codex review hardening) ---
+
+test('extractFirstJsonObject: pulls the object out of prose + fences', () => {
+  assert.deepEqual(
+    extractFirstJsonObject('Sure! ```json\n{"category":"strength"}\n``` done.'),
+    { category: 'strength' },
+  )
+})
+test('extractFirstJsonObject: ignores a trailing stray brace after a valid object', () => {
+  assert.deepEqual(extractFirstJsonObject('{"a":1} } extra'), { a: 1 })
+})
+test('extractFirstJsonObject: brace inside a string does not break balance', () => {
+  assert.deepEqual(extractFirstJsonObject('{"note":"a } b"}'), { note: 'a } b' })
+})
+test('extractFirstJsonObject: returns null when there is no JSON', () => {
+  assert.equal(extractFirstJsonObject('no json here'), null)
+  assert.equal(extractFirstJsonObject(42), null)
+})
+
+test('normalizeEntry: negative weight is clamped to 0', () => {
+  const e = normalizeEntry({ category: 'strength', metrics: { sets: [{ weight: -100, reps: 5, unit: 'kg' }] } })
+  assert.equal(e.metrics.sets[0].weight_kg, 0)
+})
+test('normalizeEntry: non-string activity falls back to the category label, no throw', () => {
+  const e = normalizeEntry({ category: 'strength', activity: { x: 1 }, metrics: { sets: [] } })
+  assert.equal(typeof e.activity, 'string')
+  assert.ok(e.activity.length > 0)
+})
+test('assignSession: a back-dated entry does not join a future session', () => {
+  const now = 1_000_000_000_000
+  const entries = [{ ts: now, sessionId: 's-future' }]
+  // an entry an hour BEFORE the newest must NOT reuse the future session id
+  assert.notEqual(assignSession(entries, now - 3_600_000), 's-future')
+})
+test('epley1RM: negative or zero inputs return 0', () => {
+  assert.equal(epley1RM(100, -5), 0)
+  assert.equal(epley1RM(-100, 5), 0)
+  assert.equal(epley1RM(0, 5), 0)
+  assert.ok(epley1RM(100, 5) > 100)
+})
 
 const here = dirname(fileURLToPath(import.meta.url))
 

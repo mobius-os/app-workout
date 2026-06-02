@@ -93,6 +93,34 @@ export function uid() {
   return Math.random().toString(36).slice(2, 9)
 }
 
+// Extract the first BALANCED, parseable JSON object from a string that may be
+// wrapped in prose or ```json fences. A greedy /\{[\s\S]*\}/ breaks when the
+// model adds a trailing brace or commentary after the object; this scans each
+// '{' for a string-aware balanced match and returns the first that JSON.parses
+// (or null). Used to read the model's reply in handleSend.
+export function extractFirstJsonObject(text) {
+  if (typeof text !== 'string') return null
+  for (let i = text.indexOf('{'); i >= 0; i = text.indexOf('{', i + 1)) {
+    let depth = 0, inStr = false, esc = false
+    for (let j = i; j < text.length; j++) {
+      const c = text[j]
+      if (inStr) {
+        if (esc) esc = false
+        else if (c === '\\') esc = true
+        else if (c === '"') inStr = false
+      } else if (c === '"') inStr = true
+      else if (c === '{') depth++
+      else if (c === '}') {
+        depth -= 1
+        if (depth === 0) {
+          try { return JSON.parse(text.slice(i, j + 1)) } catch { break }
+        }
+      }
+    }
+  }
+  return null
+}
+
 // ---------------------------------------------------------------------------
 // parseEntry → normalizeEntry. The LLM returns a loose, display-unit JSON
 // blob; normalizeEntry turns it into the canonical stored Entry shape with SI
@@ -122,7 +150,7 @@ export function normalizeEntry(parsed, opts = {}) {
       sets: (Array.isArray(m.sets) ? m.sets : []).map((s) => ({
         // Store SI (kg). reps is dimensionless. We keep the user's display
         // unit on the set so the card can echo "100kg" vs "225lb" back.
-        weight_kg: toKg(s.weight, s.unit || 'kg'),
+        weight_kg: Math.max(0, toKg(s.weight, s.unit || 'kg')),
         reps: Math.max(0, Math.round(Number(s.reps) || 0)),
         unit: s.unit === 'lb' ? 'lb' : 'kg',
       })),
@@ -148,7 +176,9 @@ export function normalizeEntry(parsed, opts = {}) {
     localDate: localDate(at),
     sessionId: opts.sessionId || null, // assigned by assignSession at commit
     category,
-    activity: (parsed?.activity || CATEGORIES[category].label).trim(),
+    activity: (typeof parsed?.activity === 'string' && parsed.activity.trim())
+      ? parsed.activity.trim()
+      : CATEGORIES[category].label,
     icon: CATEGORIES[category].icon, // app owns the icon, ignore parsed.icon
     metrics,
     raw: opts.raw || '',
@@ -168,7 +198,15 @@ export function groupSessions(entries, gapMs = SESSION_GAP_MS) {
   const sessions = []
   let current = null
   for (const e of sorted) {
-    if (current && e.ts - current.lastTs <= gapMs) {
+    // Merge into the open session only within the gap AND when the stored
+    // sessionId agrees (or the entry has none). Respecting an explicit
+    // sessionId stops two deliberately-separate sessions that happen to fall
+    // within the gap from being silently fused.
+    if (
+      current &&
+      e.ts - current.lastTs <= gapMs &&
+      (!e.sessionId || e.sessionId === current.sessionId)
+    ) {
       current.entries.push(e)
       current.lastTs = e.ts
     } else {
@@ -199,7 +237,10 @@ export function groupSessions(entries, gapMs = SESSION_GAP_MS) {
 export function assignSession(entries, ts, gapMs = SESSION_GAP_MS) {
   const sorted = [...(entries || [])].sort((a, b) => b.ts - a.ts)
   const newest = sorted[0]
-  if (newest && newest.sessionId && ts - newest.ts <= gapMs) {
+  // Reuse the newest session only for an entry at or after it within the gap.
+  // Requiring ts >= newest.ts stops a back-dated entry from being absorbed
+  // into an arbitrarily future-dated session.
+  if (newest && newest.sessionId && ts >= newest.ts && ts - newest.ts <= gapMs) {
     return newest.sessionId
   }
   return `s-${ts}`
@@ -224,7 +265,9 @@ export function currentSession(entries, now = Date.now(), gapMs = SESSION_GAP_MS
 export function epley1RM(weightKg, reps) {
   const w = Number(weightKg)
   const r = Number(reps)
-  if (!w || !r) return 0
+  // Both must be finite and positive — a negative weight/reps from a bad parse
+  // would otherwise yield a plausible-looking but invalid estimate.
+  if (!Number.isFinite(w) || !Number.isFinite(r) || w <= 0 || r <= 0) return 0
   if (r === 1) return Math.round(w * 10) / 10
   return Math.round(w * (1 + r / 30) * 10) / 10
 }
