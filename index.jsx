@@ -1032,7 +1032,7 @@ function ProgramsTab({ state, onState }) {
                     Edit
                   </button>
                   <button
-                    style={{ ...S.btnSecondary, color: 'var(--red, #ef4444)' }}
+                    style={{ ...S.btnSecondary, color: 'var(--danger, #ef4444)' }}
                     onClick={(e) => {
                       e.stopPropagation()
                       setDeletePending({ id, name: prog.name })
