@@ -94,6 +94,9 @@ export function localDate(d = new Date()) {
 }
 
 export function uid() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
   return Math.random().toString(36).slice(2, 9)
 }
 
@@ -142,7 +145,8 @@ export function extractFirstJsonObject(text) {
 // ---------------------------------------------------------------------------
 
 export function normalizeEntry(parsed, opts = {}) {
-  const ts = opts.ts ?? Date.now()
+  const tsValue = Number(opts.ts ?? Date.now())
+  const ts = Number.isFinite(tsValue) ? tsValue : Date.now()
   const at = new Date(ts)
   const category = CATEGORY_KEYS.includes(parsed?.category) ? parsed.category : 'other'
   const family = categoryFamily(category)
@@ -191,6 +195,84 @@ export function normalizeEntry(parsed, opts = {}) {
   }
 }
 
+function textOrNull(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function numberOrNull(value) {
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+function normalizeStoredEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null
+  const ts = Number(entry.ts)
+  if (!Number.isFinite(ts)) return null
+  const category = CATEGORY_KEYS.includes(entry.category) ? entry.category : 'other'
+  const family = categoryFamily(category)
+  const sourceMetrics = entry.metrics && typeof entry.metrics === 'object' ? entry.metrics : {}
+  let metrics
+
+  if (family === 'strength') {
+    metrics = {
+      sets: (Array.isArray(sourceMetrics.sets) ? sourceMetrics.sets : [])
+        .map((s) => ({
+          weight_kg: numberOrNull(s?.weight_kg ?? toKg(s?.weight, s?.unit || 'kg')) ?? 0,
+          reps: Math.max(0, Math.round(Number(s?.reps) || 0)),
+          unit: s?.unit === 'lb' ? 'lb' : 'kg',
+        }))
+        .filter((s) => s.weight_kg > 0 || s.reps > 0),
+    }
+  } else if (family === 'cardio') {
+    metrics = {
+      duration_s: numberOrNull(sourceMetrics.duration_s),
+      distance_m: numberOrNull(sourceMetrics.distance_m),
+      elevation_m: numberOrNull(sourceMetrics.elevation_m),
+      location: textOrNull(sourceMetrics.location),
+    }
+  } else {
+    metrics = {
+      duration_s: numberOrNull(sourceMetrics.duration_s),
+      location: textOrNull(sourceMetrics.location),
+      note: textOrNull(sourceMetrics.note),
+    }
+  }
+
+  return {
+    id: textOrNull(entry.id) || uid(),
+    ts,
+    localDate: textOrNull(entry.localDate) || localDate(new Date(ts)),
+    sessionId: textOrNull(entry.sessionId) || null,
+    category,
+    activity: textOrNull(entry.activity) || CATEGORIES[category].label,
+    icon: CATEGORIES[category].icon,
+    metrics,
+    raw: typeof entry.raw === 'string' ? entry.raw : '',
+    source: textOrNull(entry.source) || 'ai',
+    confirmed: entry.confirmed !== false,
+  }
+}
+
+export function normalizeStoredEntries(entries) {
+  if (!Array.isArray(entries)) return []
+  return entries
+    .map(normalizeStoredEntry)
+    .filter(Boolean)
+    .sort((a, b) => a.ts - b.ts)
+}
+
+export function mergeEntriesForSave(localEntries, remoteEntries, deletedIds = []) {
+  const deleted = new Set((deletedIds || []).filter(Boolean))
+  const merged = new Map()
+  for (const entry of normalizeStoredEntries(remoteEntries)) {
+    if (!deleted.has(entry.id)) merged.set(entry.id, entry)
+  }
+  for (const entry of normalizeStoredEntries(localEntries)) {
+    if (!deleted.has(entry.id)) merged.set(entry.id, entry)
+  }
+  return [...merged.values()].sort((a, b) => a.ts - b.ts)
+}
+
 // ---------------------------------------------------------------------------
 // Session grouping — entries within SESSION_GAP_MS of each other (in time
 // order) share a sessionId. groupSessions takes the full append-only entries
@@ -198,27 +280,31 @@ export function normalizeEntry(parsed, opts = {}) {
 // ---------------------------------------------------------------------------
 
 export function groupSessions(entries, gapMs = SESSION_GAP_MS) {
-  const sorted = [...(entries || [])].sort((a, b) => a.ts - b.ts)
+  const sorted = [...(entries || [])]
+    .filter((e) => Number.isFinite(Number(e?.ts)))
+    .sort((a, b) => Number(a.ts) - Number(b.ts))
   const sessions = []
   let current = null
   for (const e of sorted) {
+    const ts = Number(e.ts)
     // Merge into the open session only within the gap AND when the stored
     // sessionId agrees (or the entry has none). Respecting an explicit
     // sessionId stops two deliberately-separate sessions that happen to fall
     // within the gap from being silently fused.
     if (
       current &&
-      e.ts - current.lastTs <= gapMs &&
+      ts >= current.lastTs &&
+      ts - current.lastTs <= gapMs &&
       (!e.sessionId || e.sessionId === current.sessionId)
     ) {
       current.entries.push(e)
-      current.lastTs = e.ts
+      current.lastTs = ts
     } else {
       current = {
-        sessionId: e.sessionId || `s-${e.ts}`,
-        startTs: e.ts,
-        lastTs: e.ts,
-        localDate: e.localDate,
+        sessionId: e.sessionId || `s-${ts}`,
+        startTs: ts,
+        lastTs: ts,
+        localDate: e.localDate || localDate(new Date(ts)),
         entries: [e],
       }
       sessions.push(current)
@@ -461,31 +547,57 @@ export function fmtDuration(seconds) {
 
 export function fmtDistance(metres) {
   const m = Number(metres) || 0
-  if (m >= 1000) return `${Math.round((m / 1000) * 100) / 100} km`
-  return `${Math.round(m)} m`
+  if (m >= 1000) return `${(Math.round((m / 1000) * 10) / 10).toFixed(1)}km`
+  return `${Math.round(m)}m`
+}
+
+function fmtPace(durationS, distanceM) {
+  const d = Number(distanceM) || 0
+  const s = Number(durationS) || 0
+  if (d <= 0 || s <= 0) return null
+  const secPerKm = s / (d / 1000)
+  if (!Number.isFinite(secPerKm)) return null
+  const mins = Math.floor(secPerKm / 60)
+  const secs = String(Math.round(secPerKm % 60)).padStart(2, '0')
+  return `${mins}:${secs}/km`
+}
+
+function summarizeStrengthSets(sets) {
+  const rows = Array.isArray(sets) ? sets : []
+  if (rows.length === 0) return ''
+  const groups = new Map()
+  for (const s of rows) {
+    const unit = s.unit === 'lb' ? 'lb' : 'kg'
+    const weight = fromKg(s.weight_kg, unit)
+    const reps = Math.max(0, Math.round(Number(s.reps) || 0))
+    const key = `${reps}|${weight}|${unit}`
+    groups.set(key, (groups.get(key) || 0) + 1)
+  }
+  return [...groups.entries()].map(([key, count]) => {
+    const [reps, weight, unit] = key.split('|')
+    return `${count}×${reps} @ ${weight}${unit}`
+  }).join(' · ')
 }
 
 // One-line summary of an entry's metrics, for the feed card.
 export function summarizeMetrics(entry) {
   const fam = categoryFamily(entry.category)
   if (fam === 'strength') {
-    const sets = entry.metrics?.sets || []
-    if (sets.length === 0) return ''
-    return sets
-      .map((s) => `${fromKg(s.weight_kg, s.unit)}${s.unit} × ${s.reps}`)
-      .join(', ')
+    return summarizeStrengthSets(entry.metrics?.sets)
   }
   if (fam === 'cardio') {
     const parts = []
     if (entry.metrics?.distance_m) parts.push(fmtDistance(entry.metrics.distance_m))
+    const pace = fmtPace(entry.metrics?.duration_s, entry.metrics?.distance_m)
+    if (pace) parts.push(pace)
     if (entry.metrics?.duration_s) parts.push(fmtDuration(entry.metrics.duration_s))
     if (entry.metrics?.elevation_m) parts.push(`↑${Math.round(entry.metrics.elevation_m)}m`)
-    if (entry.metrics?.location) parts.push(`📍${entry.metrics.location}`)
+    if (entry.metrics?.location) parts.push(entry.metrics.location)
     return parts.join(' · ')
   }
   const parts = []
   if (entry.metrics?.duration_s) parts.push(fmtDuration(entry.metrics.duration_s))
-  if (entry.metrics?.location) parts.push(`📍${entry.metrics.location}`)
+  if (entry.metrics?.location) parts.push(entry.metrics.location)
   if (entry.metrics?.note) parts.push(entry.metrics.note)
   return parts.join(' · ')
 }

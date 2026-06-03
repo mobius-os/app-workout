@@ -14,6 +14,13 @@ import { dirname, join } from 'node:path'
 const here = dirname(fileURLToPath(import.meta.url))
 const START = '// ===== INLINE-LOGIC START (generated from logic.js — run build-entry.mjs) ====='
 const END = '// ===== INLINE-LOGIC END ====='
+const TEST_EXPORTS = [
+  'normalizeEntry',
+  'normalizeStoredEntries',
+  'mergeEntriesForSave',
+  'groupSessions',
+  'summarizeMetrics',
+]
 
 export function stripExports(logicSource) {
   // Drop the leading export keyword from top-level declarations and re-exports.
@@ -26,7 +33,8 @@ export function stripExports(logicSource) {
 
 export function buildEntry(indexSource, logicSource) {
   const inlined = stripExports(logicSource)
-  const block = `${START}\n${inlined}\n${END}`
+  const exportBlock = `export {\n  ${TEST_EXPORTS.join(',\n  ')},\n}`
+  const block = `${START}\n${inlined}\n\n${exportBlock}\n${END}`
   const re = new RegExp(`${escapeRe(START)}[\\s\\S]*?${escapeRe(END)}`)
   if (!re.test(indexSource)) {
     throw new Error('index.jsx is missing the INLINE-LOGIC sentinels')

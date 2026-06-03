@@ -12,7 +12,8 @@ import { dirname, join } from 'node:path'
 import {
   normalizeEntry, assignSession, currentSession, groupSessions,
   epley1RM, strengthPRs, cardioBests, migrateLegacyState,
-  SESSION_GAP_MS, toKg, summarizeMetrics, extractFirstJsonObject,
+  SESSION_GAP_MS, toKg, summarizeMetrics, extractFirstJsonObject, localDate,
+  mergeEntriesForSave,
 } from '../logic.js'
 import { buildEntry } from '../build-entry.mjs'
 
@@ -43,6 +44,13 @@ test('normalizeEntry: non-string activity falls back to the category label, no t
   const e = normalizeEntry({ category: 'strength', activity: { x: 1 }, metrics: { sets: [] } })
   assert.equal(typeof e.activity, 'string')
   assert.ok(e.activity.length > 0)
+})
+test('normalizeEntry: non-finite timestamp falls back to now', () => {
+  const before = Date.now()
+  const e = normalizeEntry({ category: 'other', metrics: {} }, { ts: Number.NaN })
+  const after = Date.now()
+  assert.ok(e.ts >= before && e.ts <= after)
+  assert.equal(e.localDate, localDate(new Date(e.ts)))
 })
 test('assignSession: a back-dated entry does not join a future session', () => {
   const now = 1_000_000_000_000
@@ -156,6 +164,14 @@ test('currentSession returns the open session within the gap, null past it', () 
   ]
   assert.ok(currentSession(entries, base + 60 * 1000)) // 1 min later: open
   assert.equal(currentSession(entries, base + SESSION_GAP_MS + 1), null) // past gap
+})
+
+test('mergeEntriesForSave keeps sibling-device entries while applying local edits', () => {
+  const merged = mergeEntriesForSave(
+    [{ id: 'local', ts: 2, category: 'other', activity: 'Local', metrics: { note: 'mine' } }],
+    [{ id: 'remote', ts: 1, category: 'running', activity: 'Remote', metrics: { distance_m: 500 } }],
+  )
+  assert.deepEqual(merged.map((entry) => entry.id), ['remote', 'local'])
 })
 
 test('epley1RM matches the Epley formula and ranks reps over a single', () => {

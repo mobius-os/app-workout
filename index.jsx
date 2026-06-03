@@ -102,6 +102,9 @@ function localDate(d = new Date()) {
 }
 
 function uid() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
   return Math.random().toString(36).slice(2, 9)
 }
 
@@ -266,6 +269,18 @@ function normalizeStoredEntries(entries) {
     .sort((a, b) => a.ts - b.ts)
 }
 
+function mergeEntriesForSave(localEntries, remoteEntries, deletedIds = []) {
+  const deleted = new Set((deletedIds || []).filter(Boolean))
+  const merged = new Map()
+  for (const entry of normalizeStoredEntries(remoteEntries)) {
+    if (!deleted.has(entry.id)) merged.set(entry.id, entry)
+  }
+  for (const entry of normalizeStoredEntries(localEntries)) {
+    if (!deleted.has(entry.id)) merged.set(entry.id, entry)
+  }
+  return [...merged.values()].sort((a, b) => a.ts - b.ts)
+}
+
 // ---------------------------------------------------------------------------
 // Session grouping — entries within SESSION_GAP_MS of each other (in time
 // order) share a sessionId. groupSessions takes the full append-only entries
@@ -404,7 +419,51 @@ function cardioBests(entries) {
   return [...byActivity.values()].sort((a, b) => b.maxDistance_m - a.maxDistance_m)
 }
 
-// Set of local dates that have any entry — drives the streak heatmap.
+// ---------------------------------------------------------------------------
+// Category split for the donut: count of entries per category.
+// ---------------------------------------------------------------------------
+
+function categorySplit(entries) {
+  const counts = new Map()
+  for (const e of entries || []) {
+    counts.set(e.category, (counts.get(e.category) || 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([category, count]) => ({
+      category,
+      label: CATEGORIES[category]?.label || category,
+      color: CATEGORIES[category]?.color || '#a1a1aa',
+      count,
+    }))
+    .sort((a, b) => b.count - a.count)
+}
+
+// Volume over time — one point per local day, one numeric series per category
+// family. Strength volume = Σ(weight_kg × reps); cardio volume = Σ distance_m
+// (km for readability); other = Σ duration_s (minutes). Returns rows keyed by
+// date with a column per category present, suitable for a stacked bar/area.
+function volumeByDay(entries) {
+  const byDay = new Map()
+  for (const e of entries || []) {
+    const day = e.localDate
+    if (!byDay.has(day)) byDay.set(day, { date: day })
+    const row = byDay.get(day)
+    const fam = categoryFamily(e.category)
+    let v = 0
+    if (fam === 'strength') {
+      for (const s of e.metrics?.sets || []) v += (s.weight_kg || 0) * (s.reps || 0)
+    } else if (fam === 'cardio') {
+      v = (e.metrics?.distance_m || 0) / 1000 // km
+    } else {
+      v = (e.metrics?.duration_s || 0) / 60 // minutes
+    }
+    row[e.category] = Math.round(((row[e.category] || 0) + v) * 10) / 10
+  }
+  return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date))
+}
+
+// Set of local dates that have any entry — drives the streak heatmap (the one
+// chart that must work offline, since it needs no recharts).
 function activeDays(entries) {
   const s = new Set()
   for (const e of entries || []) s.add(e.localDate)
@@ -551,16 +610,10 @@ function summarizeMetrics(entry) {
   return parts.join(' · ')
 }
 
-function fmtSessionRange(session) {
-  if (!session || session.entries.length <= 1) return `${session?.entries?.length || 0} entry`
-  const start = new Date(session.startTs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  const end = new Date(session.endTs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  return `${start} - ${end} · ${session.entries.length} entries`
-}
-
 export {
   normalizeEntry,
   normalizeStoredEntries,
+  mergeEntriesForSave,
   groupSessions,
   summarizeMetrics,
 }
@@ -1867,11 +1920,15 @@ export default function App({ appId, token }) {
     if (q.inFlight) return
     q.inFlight = true
     while (q.pending) {
-      const nextEntries = q.pending
+      const pending = q.pending
       q.pending = null
+      const nextEntries = pending.entries
       try {
-        const result = await store.set('entries.json', nextEntries)
+        const remoteEntries = await store.get('entries.json')
+        const mergedEntries = mergeEntriesForSave(nextEntries, remoteEntries, pending.deletedIds)
+        const result = await store.set('entries.json', mergedEntries)
         bumpSync(result)
+        if (!q.pending) setEntries(mergedEntries)
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('entries save failed', err)
@@ -1882,9 +1939,17 @@ export default function App({ appId, token }) {
   }, [store, bumpSync])
 
   // Append-only write: optimistic local update + serialized write-through.
-  const persist = useCallback((nextEntries) => {
+  const persist = useCallback((nextEntries, options = {}) => {
     setEntries(nextEntries)
-    saveQueueRef.current.pending = nextEntries
+    const previous = saveQueueRef.current.pending
+    const deletedIds = new Set([
+      ...(previous?.deletedIds || []),
+      ...(options.deletedIds || []),
+    ])
+    saveQueueRef.current.pending = {
+      entries: nextEntries,
+      deletedIds: [...deletedIds],
+    }
     flushSaves()
   }, [flushSaves])
 
@@ -1911,7 +1976,7 @@ export default function App({ appId, token }) {
   }, [entries, pendingDraft, persist])
 
   const deleteEntry = useCallback((id) => {
-    persist((entries || []).filter((e) => e.id !== id))
+    persist((entries || []).filter((e) => e.id !== id), { deletedIds: [id] })
   }, [entries, persist])
 
   // Send the composer text to /api/ai, parse the JSON, open the confirm card.

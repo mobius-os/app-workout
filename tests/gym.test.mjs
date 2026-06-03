@@ -22,6 +22,7 @@ execFileSync(esbuild, [
 const {
   normalizeEntry,
   normalizeStoredEntries,
+  mergeEntriesForSave,
   groupSessions,
   summarizeMetrics,
 } = await import('./.build/index.mjs')
@@ -129,6 +130,24 @@ test('normalizeStoredEntries rejects sparse malformed rows and normalizes all th
   })
   assert.equal(entries[1].confirmed, false)
   assert.deepEqual(entries[2].metrics.sets, [{ weight_kg: 100, reps: 5, unit: 'kg' }])
+})
+
+test('mergeEntriesForSave preserves remote additions and honors local deletes', () => {
+  const remote = [
+    { id: 'remote-only', ts: 100, category: 'running', activity: 'Run', metrics: { distance_m: 1000 } },
+    { id: 'changed', ts: 200, category: 'other', activity: 'Old', metrics: { note: 'remote' } },
+    { id: 'deleted', ts: 300, category: 'other', activity: 'Delete me', metrics: {} },
+  ]
+  const local = [
+    { id: 'changed', ts: 250, category: 'other', activity: 'New', metrics: { note: 'local' } },
+    { id: 'local-only', ts: 400, category: 'strength', activity: 'Bench', metrics: { sets: [{ weight_kg: 80, reps: 5 }] } },
+  ]
+
+  const merged = mergeEntriesForSave(local, remote, ['deleted'])
+
+  assert.deepEqual(merged.map((entry) => entry.id), ['remote-only', 'changed', 'local-only'])
+  assert.equal(merged.find((entry) => entry.id === 'changed').activity, 'New')
+  assert.equal(merged.find((entry) => entry.id === 'remote-only').activity, 'Run')
 })
 
 test('groupSessions uses forward-contiguous gap boundaries and rejects non-finite timestamps', () => {
