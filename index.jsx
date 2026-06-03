@@ -404,49 +404,6 @@ function cardioBests(entries) {
   return [...byActivity.values()].sort((a, b) => b.maxDistance_m - a.maxDistance_m)
 }
 
-// ---------------------------------------------------------------------------
-// Category split for the donut: count of entries per category.
-// ---------------------------------------------------------------------------
-
-function categorySplit(entries) {
-  const counts = new Map()
-  for (const e of entries || []) {
-    counts.set(e.category, (counts.get(e.category) || 0) + 1)
-  }
-  return [...counts.entries()]
-    .map(([category, count]) => ({
-      category,
-      label: CATEGORIES[category]?.label || category,
-      color: CATEGORIES[category]?.color || '#a1a1aa',
-      count,
-    }))
-    .sort((a, b) => b.count - a.count)
-}
-
-// Volume over time — one point per local day, one numeric series per category
-// family. Strength volume = Σ(weight_kg × reps); cardio volume = Σ distance_m
-// (km for readability); other = Σ duration_s (minutes). Returns rows keyed by
-// date with a column per category present, suitable for a stacked bar/area.
-function volumeByDay(entries) {
-  const byDay = new Map()
-  for (const e of entries || []) {
-    const day = e.localDate
-    if (!byDay.has(day)) byDay.set(day, { date: day })
-    const row = byDay.get(day)
-    const fam = categoryFamily(e.category)
-    let v = 0
-    if (fam === 'strength') {
-      for (const s of e.metrics?.sets || []) v += (s.weight_kg || 0) * (s.reps || 0)
-    } else if (fam === 'cardio') {
-      v = (e.metrics?.distance_m || 0) / 1000 // km
-    } else {
-      v = (e.metrics?.duration_s || 0) / 60 // minutes
-    }
-    row[e.category] = Math.round(((row[e.category] || 0) + v) * 10) / 10
-  }
-  return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date))
-}
-
 // Set of local dates that have any entry — drives the streak heatmap.
 function activeDays(entries) {
   const s = new Set()
@@ -1576,9 +1533,15 @@ function entryVolume(entry) {
 
 function weeklyVolumeByCategory(entries) {
   const now = Date.now()
-  const currentWeek = startOfWeekTs(now)
+  // Build the 6 week-start keys with CALENDAR arithmetic (setDate + the same
+  // startOfWeekTs entries use), so a bucket key equals startOfWeekTs(entry.ts)
+  // exactly. Subtracting a fixed 7*24h in ms drifts by an hour across a DST
+  // transition, landing off the true local midnight — then byTs.get() misses
+  // and that week's entries silently vanish from the chart.
   const weeks = Array.from({ length: 6 }, (_, i) => {
-    const ts = currentWeek - (5 - i) * 7 * 24 * 60 * 60 * 1000
+    const d = new Date(now)
+    d.setDate(d.getDate() - (5 - i) * 7)
+    const ts = startOfWeekTs(d.getTime())
     return {
       ts,
       label: new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' }),
