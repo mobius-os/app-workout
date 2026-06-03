@@ -1982,7 +1982,7 @@ export default function App({ appId, token }) {
     <div style={{ ...S.root, position: 'relative' }}>
       <div style={S.header}>
         <div>
-          <h1 style={S.title}>Activity</h1>
+          <h1 style={S.title}>Workout</h1>
           <p style={S.subtitle}>{subtitle}</p>
         </div>
         <SyncPill status={syncStatus} />

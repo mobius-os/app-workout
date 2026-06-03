@@ -1,4 +1,4 @@
-# Activity
+# Workout
 
 A natural-language activity logger for [Möbius](https://github.com/mobius-os). Type what you did — `3×5 deadlift at 100kg`, `ran 5k in 24 min`, `hiked 8h in Hawaii`, `played football for an hour` — and it parses the entry, lets you confirm or tweak it, auto-categorizes it, and groups it into sessions. Built for the gym, generalized to any activity.
 
@@ -6,7 +6,7 @@ A natural-language activity logger for [Möbius](https://github.com/mobius-os). 
 
 ### Via the App Store (recommended)
 
-Open the **App Store** mini-app in Möbius, search for "Activity", tap **Install**.
+Open the **App Store** mini-app in Möbius, search for "Workout", tap **Install**.
 
 ### Via paste-a-URL
 
@@ -32,7 +32,7 @@ Ten categories — `strength`, `cardio`, `running`, `cycling`, `swimming`, `rowi
 
 ## Data shape
 
-Activity is **append-only**. Each logged activity is one entry in `entries.json`; sessions are *derived* (never stored) by grouping entries within a 4-hour gap. Weights are stored in **kilograms**, distances in **metres**, durations in **seconds** (SI) regardless of the units you typed, so analytics never has to branch on unit.
+Workout is **append-only**. Each logged activity is one entry in `entries.json`; sessions are *derived* (never stored) by grouping entries within a 4-hour gap. Weights are stored in **kilograms**, distances in **metres**, durations in **seconds** (SI) regardless of the units you typed, so analytics never has to branch on unit.
 
 ```json
 [
