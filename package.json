@@ -6,6 +6,6 @@
   "description": "Dev/test harness only — Mobius installs index.jsx as a single compiled module. This package.json exists so logic.js is ESM-resolved for node --test and so build-entry.mjs can inline it.",
   "scripts": {
     "build": "node build-entry.mjs",
-    "test": "node build-entry.mjs && node --test"
+    "test": "NODE_PATH=/home/hmzmrzx/projects/mobius/frontend/node_modules node --test tests/"
   }
 }

@@ -539,8 +539,8 @@ function fmtDuration(seconds) {
 
 function fmtDistance(metres) {
   const m = Number(metres) || 0
-  if (m >= 1000) return `${(Math.round((m / 1000) * 10) / 10).toFixed(1)} km`
-  return `${Math.round(m)} m`
+  if (m >= 1000) return `${(Math.round((m / 1000) * 10) / 10).toFixed(1)}km`
+  return `${Math.round(m)}m`
 }
 
 function fmtPace(durationS, distanceM) {
@@ -567,7 +567,7 @@ function summarizeStrengthSets(sets) {
   }
   return [...groups.entries()].map(([key, count]) => {
     const [reps, weight, unit] = key.split('|')
-    return `${count}×${reps} @ ${weight} ${unit}`
+    return `${count}×${reps} @ ${weight}${unit}`
   }).join(' · ')
 }
 
@@ -599,6 +599,13 @@ function fmtSessionRange(session) {
   const start = new Date(session.startTs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   const end = new Date(session.endTs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   return `${start} - ${end} · ${session.entries.length} entries`
+}
+
+export {
+  normalizeEntry,
+  normalizeStoredEntries,
+  groupSessions,
+  summarizeMetrics,
 }
 // ===== INLINE-LOGIC END =====
 
