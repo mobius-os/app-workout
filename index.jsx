@@ -1996,7 +1996,13 @@ export default function App({ appId, token }) {
               ambiguous={pendingDraft.ambiguous}
               clarification={pendingDraft.clarification}
               onCommit={commitDraft}
-              onCancel={() => setPendingDraft(null)}
+              onCancel={() => {
+                // Restore what the user typed — a successful parse clears the
+                // composer, so a bare setPendingDraft(null) would lose the
+                // original text and force them to retype it to edit/retry.
+                if (pendingDraft?.raw) setInput(pendingDraft.raw)
+                setPendingDraft(null)
+              }}
             />
           ) : (
             <>
