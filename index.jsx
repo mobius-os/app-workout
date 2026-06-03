@@ -1,10 +1,6 @@
 import React, {
   useState, useEffect, useCallback, useMemo, useRef,
 } from 'react'
-import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
-  Tooltip, CartesianGrid, ResponsiveContainer, Legend,
-} from 'recharts'
 // The pure logic lives in logic.js (the test target) and is inlined below by
 // build-entry.mjs, because Mobius's installer compiles ONLY this single entry
 // file — a relative import of a sibling module can't be resolved at install.
@@ -154,7 +150,8 @@ function extractFirstJsonObject(text) {
 // ---------------------------------------------------------------------------
 
 function normalizeEntry(parsed, opts = {}) {
-  const ts = opts.ts ?? Date.now()
+  const tsValue = Number(opts.ts ?? Date.now())
+  const ts = Number.isFinite(tsValue) ? tsValue : Date.now()
   const at = new Date(ts)
   const category = CATEGORY_KEYS.includes(parsed?.category) ? parsed.category : 'other'
   const family = categoryFamily(category)
@@ -203,6 +200,72 @@ function normalizeEntry(parsed, opts = {}) {
   }
 }
 
+function textOrNull(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function numberOrNull(value) {
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+function normalizeStoredEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null
+  const ts = Number(entry.ts)
+  if (!Number.isFinite(ts)) return null
+  const category = CATEGORY_KEYS.includes(entry.category) ? entry.category : 'other'
+  const family = categoryFamily(category)
+  const sourceMetrics = entry.metrics && typeof entry.metrics === 'object' ? entry.metrics : {}
+  let metrics
+
+  if (family === 'strength') {
+    metrics = {
+      sets: (Array.isArray(sourceMetrics.sets) ? sourceMetrics.sets : [])
+        .map((s) => ({
+          weight_kg: numberOrNull(s?.weight_kg ?? toKg(s?.weight, s?.unit || 'kg')) ?? 0,
+          reps: Math.max(0, Math.round(Number(s?.reps) || 0)),
+          unit: s?.unit === 'lb' ? 'lb' : 'kg',
+        }))
+        .filter((s) => s.weight_kg > 0 || s.reps > 0),
+    }
+  } else if (family === 'cardio') {
+    metrics = {
+      duration_s: numberOrNull(sourceMetrics.duration_s),
+      distance_m: numberOrNull(sourceMetrics.distance_m),
+      elevation_m: numberOrNull(sourceMetrics.elevation_m),
+      location: textOrNull(sourceMetrics.location),
+    }
+  } else {
+    metrics = {
+      duration_s: numberOrNull(sourceMetrics.duration_s),
+      location: textOrNull(sourceMetrics.location),
+      note: textOrNull(sourceMetrics.note),
+    }
+  }
+
+  return {
+    id: textOrNull(entry.id) || uid(),
+    ts,
+    localDate: textOrNull(entry.localDate) || localDate(new Date(ts)),
+    sessionId: textOrNull(entry.sessionId) || null,
+    category,
+    activity: textOrNull(entry.activity) || CATEGORIES[category].label,
+    icon: CATEGORIES[category].icon,
+    metrics,
+    raw: typeof entry.raw === 'string' ? entry.raw : '',
+    source: textOrNull(entry.source) || 'ai',
+    confirmed: entry.confirmed !== false,
+  }
+}
+
+function normalizeStoredEntries(entries) {
+  if (!Array.isArray(entries)) return []
+  return entries
+    .map(normalizeStoredEntry)
+    .filter(Boolean)
+    .sort((a, b) => a.ts - b.ts)
+}
+
 // ---------------------------------------------------------------------------
 // Session grouping — entries within SESSION_GAP_MS of each other (in time
 // order) share a sessionId. groupSessions takes the full append-only entries
@@ -210,27 +273,31 @@ function normalizeEntry(parsed, opts = {}) {
 // ---------------------------------------------------------------------------
 
 function groupSessions(entries, gapMs = SESSION_GAP_MS) {
-  const sorted = [...(entries || [])].sort((a, b) => a.ts - b.ts)
+  const sorted = [...(entries || [])]
+    .filter((e) => Number.isFinite(Number(e?.ts)))
+    .sort((a, b) => Number(a.ts) - Number(b.ts))
   const sessions = []
   let current = null
   for (const e of sorted) {
+    const ts = Number(e.ts)
     // Merge into the open session only within the gap AND when the stored
     // sessionId agrees (or the entry has none). Respecting an explicit
     // sessionId stops two deliberately-separate sessions that happen to fall
     // within the gap from being silently fused.
     if (
       current &&
-      e.ts - current.lastTs <= gapMs &&
+      ts >= current.lastTs &&
+      ts - current.lastTs <= gapMs &&
       (!e.sessionId || e.sessionId === current.sessionId)
     ) {
       current.entries.push(e)
-      current.lastTs = e.ts
+      current.lastTs = ts
     } else {
       current = {
-        sessionId: e.sessionId || `s-${e.ts}`,
-        startTs: e.ts,
-        lastTs: e.ts,
-        localDate: e.localDate,
+        sessionId: e.sessionId || `s-${ts}`,
+        startTs: ts,
+        lastTs: ts,
+        localDate: e.localDate || localDate(new Date(ts)),
         entries: [e],
       }
       sessions.push(current)
@@ -380,8 +447,7 @@ function volumeByDay(entries) {
   return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date))
 }
 
-// Set of local dates that have any entry — drives the streak heatmap (the one
-// chart that must work offline, since it needs no recharts).
+// Set of local dates that have any entry — drives the streak heatmap.
 function activeDays(entries) {
   const s = new Set()
   for (const e of entries || []) s.add(e.localDate)
@@ -473,33 +539,66 @@ function fmtDuration(seconds) {
 
 function fmtDistance(metres) {
   const m = Number(metres) || 0
-  if (m >= 1000) return `${Math.round((m / 1000) * 100) / 100} km`
+  if (m >= 1000) return `${(Math.round((m / 1000) * 10) / 10).toFixed(1)} km`
   return `${Math.round(m)} m`
+}
+
+function fmtPace(durationS, distanceM) {
+  const d = Number(distanceM) || 0
+  const s = Number(durationS) || 0
+  if (d <= 0 || s <= 0) return null
+  const secPerKm = s / (d / 1000)
+  if (!Number.isFinite(secPerKm)) return null
+  const mins = Math.floor(secPerKm / 60)
+  const secs = String(Math.round(secPerKm % 60)).padStart(2, '0')
+  return `${mins}:${secs}/km`
+}
+
+function summarizeStrengthSets(sets) {
+  const rows = Array.isArray(sets) ? sets : []
+  if (rows.length === 0) return ''
+  const groups = new Map()
+  for (const s of rows) {
+    const unit = s.unit === 'lb' ? 'lb' : 'kg'
+    const weight = fromKg(s.weight_kg, unit)
+    const reps = Math.max(0, Math.round(Number(s.reps) || 0))
+    const key = `${reps}|${weight}|${unit}`
+    groups.set(key, (groups.get(key) || 0) + 1)
+  }
+  return [...groups.entries()].map(([key, count]) => {
+    const [reps, weight, unit] = key.split('|')
+    return `${count}×${reps} @ ${weight} ${unit}`
+  }).join(' · ')
 }
 
 // One-line summary of an entry's metrics, for the feed card.
 function summarizeMetrics(entry) {
   const fam = categoryFamily(entry.category)
   if (fam === 'strength') {
-    const sets = entry.metrics?.sets || []
-    if (sets.length === 0) return ''
-    return sets
-      .map((s) => `${fromKg(s.weight_kg, s.unit)}${s.unit} × ${s.reps}`)
-      .join(', ')
+    return summarizeStrengthSets(entry.metrics?.sets)
   }
   if (fam === 'cardio') {
     const parts = []
     if (entry.metrics?.distance_m) parts.push(fmtDistance(entry.metrics.distance_m))
+    const pace = fmtPace(entry.metrics?.duration_s, entry.metrics?.distance_m)
+    if (pace) parts.push(pace)
     if (entry.metrics?.duration_s) parts.push(fmtDuration(entry.metrics.duration_s))
     if (entry.metrics?.elevation_m) parts.push(`↑${Math.round(entry.metrics.elevation_m)}m`)
-    if (entry.metrics?.location) parts.push(`📍${entry.metrics.location}`)
+    if (entry.metrics?.location) parts.push(entry.metrics.location)
     return parts.join(' · ')
   }
   const parts = []
   if (entry.metrics?.duration_s) parts.push(fmtDuration(entry.metrics.duration_s))
-  if (entry.metrics?.location) parts.push(`📍${entry.metrics.location}`)
+  if (entry.metrics?.location) parts.push(entry.metrics.location)
   if (entry.metrics?.note) parts.push(entry.metrics.note)
   return parts.join(' · ')
+}
+
+function fmtSessionRange(session) {
+  if (!session || session.entries.length <= 1) return `${session?.entries?.length || 0} entry`
+  const start = new Date(session.startTs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  const end = new Date(session.endTs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return `${start} - ${end} · ${session.entries.length} entries`
 }
 // ===== INLINE-LOGIC END =====
 
@@ -756,34 +855,37 @@ const S = {
     width: '100%', maxWidth: '720px', marginLeft: 'auto', marginRight: 'auto',
   },
   header: {
-    padding: '18px 20px 12px', display: 'flex', alignItems: 'center',
+    padding: '18px 20px 14px', display: 'flex', alignItems: 'center',
     justifyContent: 'space-between', flexShrink: 0,
     borderBottom: '1px solid var(--border)',
+    background: 'linear-gradient(180deg, rgba(255,255,255,0.03), transparent)',
   },
-  title: { fontSize: '22px', fontWeight: 700, letterSpacing: '-0.3px', margin: 0 },
+  title: { fontSize: '22px', fontWeight: 760, letterSpacing: 0, margin: 0 },
   subtitle: { fontSize: '12px', color: 'var(--muted)', margin: '2px 0 0' },
 
   scroll: {
     flex: 1, overflowY: 'auto', overflowX: 'hidden',
-    padding: '14px 20px 200px',
+    padding: '14px 16px 210px',
     wordBreak: 'break-word', overflowWrap: 'anywhere',
   },
 
   tabbar: {
     position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 20,
-    display: 'flex', background: 'var(--surface)',
+    display: 'flex', background: 'color-mix(in srgb, var(--surface) 94%, #000)',
     borderTop: '1px solid var(--border)',
-    paddingBottom: 'env(safe-area-inset-bottom, 0px)', flexShrink: 0,
+    padding: '6px 10px env(safe-area-inset-bottom, 0px)', flexShrink: 0,
+    gap: '6px',
   },
   tabBtn: (active) => ({
-    flex: 1, padding: '12px 8px 14px', border: 'none', cursor: 'pointer',
-    background: 'transparent',
-    color: active ? 'var(--accent)' : 'var(--muted)',
-    fontFamily: 'var(--font)', fontSize: '12px', fontWeight: 600,
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
+    flex: 1, padding: '10px 8px', border: '1px solid transparent', cursor: 'pointer',
+    borderRadius: '12px',
+    background: active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
+    color: active ? 'var(--text)' : 'var(--muted)',
+    fontFamily: 'var(--font)', fontSize: '12px', fontWeight: 700,
+    display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: '6px',
     minHeight: '44px',
   }),
-  tabIcon: { fontSize: '20px', lineHeight: 1 },
+  tabIcon: { display: 'flex', lineHeight: 1 },
 
   // Sticky NL composer, styled like the Möbius chat composer: a pill input
   // pinned just above the tab bar with a round send button. `bottom` clears the
@@ -791,8 +893,8 @@ const S = {
   // tab bar carries a higher z-index as belt-and-braces.
   composerWrap: {
     position: 'absolute', left: 0, right: 0, zIndex: 10,
-    bottom: 'calc(70px + env(safe-area-inset-bottom, 0px))',
-    background: 'linear-gradient(to top, var(--bg) 70%, transparent)',
+    bottom: 'calc(74px + env(safe-area-inset-bottom, 0px))',
+    background: 'linear-gradient(to top, var(--bg) 78%, transparent)',
     padding: '12px 16px',
     pointerEvents: 'none',
   },
@@ -800,10 +902,11 @@ const S = {
     width: '100%', maxWidth: '720px', margin: '0 auto', pointerEvents: 'auto',
   },
   composer: {
-    display: 'flex', alignItems: 'flex-end', gap: '8px',
-    background: 'var(--surface)', border: '1px solid var(--border)',
-    borderRadius: '24px', padding: '6px 6px 6px 16px',
-    boxShadow: '0 6px 24px rgba(0,0,0,0.18)',
+    display: 'flex', alignItems: 'center', gap: '10px',
+    background: 'color-mix(in srgb, var(--surface) 92%, #111827)',
+    border: '1px solid color-mix(in srgb, var(--border) 80%, var(--accent))',
+    borderRadius: '22px', padding: '7px 7px 7px 16px',
+    boxShadow: '0 12px 34px rgba(0,0,0,0.28)',
   },
   composerInput: {
     flex: 1, border: 'none', outline: 'none', resize: 'none',
@@ -812,9 +915,9 @@ const S = {
     maxHeight: '120px', padding: '8px 0',
   },
   sendBtn: (enabled) => ({
-    width: '44px', height: '44px', borderRadius: '50%', flexShrink: 0,
+    width: '58px', height: '46px', borderRadius: '16px', flexShrink: 0,
     border: 'none', cursor: enabled ? 'pointer' : 'default',
-    background: enabled ? 'var(--accent)' : 'var(--border)',
+    background: enabled ? 'var(--accent)' : 'color-mix(in srgb, var(--border) 70%, #000)',
     color: '#fff', fontSize: '18px', fontWeight: 700,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     fontFamily: 'var(--font)', transition: 'background 0.15s',
@@ -826,7 +929,7 @@ const S = {
 
   card: {
     background: 'var(--surface)', border: '1px solid var(--border)',
-    borderRadius: '14px', padding: '16px', marginBottom: '14px',
+    borderRadius: '8px', padding: '16px', marginBottom: '14px',
   },
   cardTitle: { fontSize: '16px', fontWeight: 700, margin: '0 0 4px' },
   cardSub: { fontSize: '12px', color: 'var(--muted)', margin: '0 0 12px' },
@@ -853,25 +956,32 @@ const S = {
 
   // Entry feed card
   entryCard: {
-    background: 'var(--surface)', border: '1px solid var(--border)',
-    borderRadius: '14px', padding: '14px', marginBottom: '10px',
+    background: 'color-mix(in srgb, var(--surface) 94%, #000)',
+    border: '1px solid var(--border)',
+    borderRadius: '8px', padding: '13px', marginBottom: '10px',
     display: 'flex', gap: '12px', alignItems: 'flex-start',
   },
   entryIcon: (color) => ({
-    width: '40px', height: '40px', borderRadius: '10px', flexShrink: 0,
+    width: '42px', height: '42px', borderRadius: '8px', flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     fontSize: '20px', background: `${color}22`, border: `1px solid ${color}55`,
   }),
   entryBody: { flex: 1, minWidth: 0 },
   entryTop: { display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'baseline' },
-  entryName: { fontSize: '15px', fontWeight: 700, margin: 0 },
+  entryName: { fontSize: '15px', fontWeight: 760, margin: 0, letterSpacing: 0 },
   entryTime: { fontSize: '11px', color: 'var(--muted)', whiteSpace: 'nowrap' },
-  entryMeta: { fontSize: '13px', color: 'var(--text)', margin: '4px 0 0', fontVariantNumeric: 'tabular-nums' },
+  entryMeta: { fontSize: '13px', color: 'var(--text)', margin: '5px 0 0', fontVariantNumeric: 'tabular-nums' },
   entryRaw: { fontSize: '11px', color: 'var(--muted)', margin: '6px 0 0', fontStyle: 'italic' },
 
   sessionLabel: {
-    fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px',
-    color: 'var(--muted)', fontWeight: 700, margin: '18px 0 8px',
+    display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '12px',
+    fontSize: '12px', color: 'var(--muted)', fontWeight: 700, margin: '20px 0 9px',
+  },
+  sessionDate: {
+    color: 'var(--text)', fontSize: '13px', fontWeight: 800, letterSpacing: 0,
+  },
+  sessionSpan: {
+    fontSize: '11px', color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap',
   },
 
   // Inputs (confirm card + manual fallback)
@@ -901,8 +1011,8 @@ const S = {
   }),
 
   chartCard: {
-    background: 'var(--surface)', border: '1px solid var(--border)',
-    borderRadius: '14px', padding: '14px', marginBottom: '14px',
+    background: 'color-mix(in srgb, var(--surface) 94%, #000)', border: '1px solid var(--border)',
+    borderRadius: '8px', padding: '14px', marginBottom: '14px',
   },
   chartTitle: { fontSize: '14px', fontWeight: 700, margin: '0 0 2px' },
   chartSub: { fontSize: '11px', color: 'var(--muted)', margin: '0 0 10px' },
@@ -918,13 +1028,18 @@ const S = {
   heatmap: { width: '100%', height: 'auto', display: 'block', marginTop: '8px' },
 
   empty: {
-    textAlign: 'center', padding: '36px 16px', color: 'var(--muted)',
+    textAlign: 'center', padding: '48px 16px', color: 'var(--muted)',
     fontSize: '13px', lineHeight: 1.6,
+  },
+  emptyIcon: {
+    width: '58px', height: '58px', borderRadius: '18px', margin: '0 auto 14px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
+    border: '1px solid color-mix(in srgb, var(--accent) 34%, var(--border))',
   },
   loading: { textAlign: 'center', padding: '40px 16px', color: 'var(--muted)', fontSize: '13px' },
 
-  // In-app confirm modal — the sandbox excludes allow-modals, so
-  // window.confirm silently no-ops; destructive actions need an in-DOM dialog.
+  // In-app confirm modal for destructive actions in the sandbox.
   modalScrim: {
     position: 'absolute', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.5)',
     display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
@@ -954,6 +1069,43 @@ const S = {
     background: 'var(--surface)', border: '1px solid var(--accent)',
     color: 'var(--text)',
   },
+  inlineBanner: (kind) => ({
+    display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px',
+    borderRadius: '12px', padding: '10px 12px', marginTop: '10px',
+    fontSize: '12px', lineHeight: 1.45,
+    background: kind === 'success'
+      ? 'color-mix(in srgb, var(--accent) 15%, transparent)'
+      : 'color-mix(in srgb, var(--danger, #ef4444) 14%, transparent)',
+    border: `1px solid ${kind === 'success' ? 'var(--accent)' : 'var(--danger, #ef4444)'}`,
+    color: 'var(--text)',
+  }),
+  bannerClose: {
+    border: 'none', background: 'transparent', color: 'var(--muted)',
+    cursor: 'pointer', fontSize: '18px', lineHeight: 1, padding: 0,
+  },
+  spinner: {
+    width: '18px', height: '18px', borderRadius: '50%',
+    border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff',
+    animation: 'mobiusGymSpin 0.7s linear infinite',
+  },
+  barList: { display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' },
+  barRow: { display: 'grid', gridTemplateColumns: '88px 1fr 48px', gap: '10px', alignItems: 'center' },
+  barLabel: { fontSize: '12px', color: 'var(--muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' },
+  barTrack: {
+    height: '10px', borderRadius: '999px',
+    background: 'color-mix(in srgb, var(--border) 72%, transparent)', overflow: 'hidden',
+  },
+  barFill: (color, pct) => ({
+    height: '100%', width: `${Math.max(3, Math.min(100, pct))}%`,
+    borderRadius: '999px', background: color,
+  }),
+  statGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(138px, 1fr))', gap: '10px' },
+  statTile: {
+    border: '1px solid var(--border)', borderRadius: '8px', padding: '12px',
+    background: 'color-mix(in srgb, var(--bg) 55%, transparent)',
+  },
+  statValue: { fontSize: '18px', fontWeight: 800, margin: '7px 0 2px', fontVariantNumeric: 'tabular-nums' },
+  statLabel: { fontSize: '11px', color: 'var(--muted)', fontWeight: 700 },
 }
 
 // ---------------------------------------------------------------------------
@@ -1018,7 +1170,7 @@ function SyncPill({ status }) {
 }
 
 // ---------------------------------------------------------------------------
-// In-app confirm modal — substitute for window.confirm.
+// In-app confirm modal.
 // ---------------------------------------------------------------------------
 
 function ConfirmModal({ title, body, confirmLabel, onConfirm, onCancel }) {
@@ -1238,7 +1390,7 @@ function ConfirmCard({ draft, ambiguous, clarification, onCommit, onCancel }) {
 // newlines); the round button sends too. Disabled while a parse is in flight.
 // ---------------------------------------------------------------------------
 
-function Composer({ value, onChange, onSend, busy, online }) {
+function Composer({ value, onChange, onSend, busy, online, error, onDismissError, success }) {
   const taRef = useRef(null)
   // Auto-grow the textarea up to its max-height.
   useEffect(() => {
@@ -1263,19 +1415,27 @@ function Composer({ value, onChange, onSend, busy, online }) {
           <textarea
             ref={taRef} style={S.composerInput} value={value} rows={1}
             onChange={(e) => onChange(e.target.value)} onKeyDown={onKeyDown}
-            placeholder={online ? 'Did 3×5 deadlift at 100kg…' : 'Offline — type to log manually'}
-            aria-label="Describe your activity"
+            placeholder={online ? 'Log an activity… ran 5k in 24 min' : 'Offline — type to log manually'}
+            aria-label="Describe your activity" disabled={busy}
           />
           <button
             style={S.sendBtn(enabled)} onClick={() => enabled && onSend()}
             disabled={!enabled} aria-label="Log activity"
           >
-            {busy ? '…' : '↑'}
+            {busy ? <span style={S.spinner} /> : 'Log'}
           </button>
         </div>
-        <p style={S.composerHint}>
-          {online ? 'Type it like you\'d say it — I\'ll sort the rest.' : 'No connection — opening manual entry.'}
-        </p>
+        {error && (
+          <div style={S.inlineBanner('error')} role="status" aria-live="polite">
+            <span>{error}</span>
+            <button style={S.bannerClose} onClick={onDismissError} aria-label="Dismiss parse error">×</button>
+          </div>
+        )}
+        {success && (
+          <div style={S.inlineBanner('success')} role="status" aria-live="polite">
+            <span>{success}</span>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1299,9 +1459,6 @@ function EntryCard({ entry, onDelete }) {
           <span style={S.entryTime}>{time}</span>
         </div>
         <p style={S.entryMeta}>{summarizeMetrics(entry) || cat.label}</p>
-        {entry.raw && entry.source === 'ai' && (
-          <p style={S.entryRaw}>“{entry.raw}”</p>
-        )}
       </div>
       <button
         style={{ ...S.btnGhost, color: 'var(--muted)', padding: '4px 8px', minHeight: '44px' }}
@@ -1316,9 +1473,11 @@ function LogTab({ entries, onDelete }) {
   if (entries.length === 0) {
     return (
       <div style={S.empty}>
-        Nothing logged yet.<br />
-        Type what you did in the box below — “ran 5k in 24 min”, “3×5 squat at 80kg”,
-        “hiked 8h in Hawaii” — and it lands here.
+        <div style={S.emptyIcon}>
+          <SportIcon name="barbell" color="var(--accent)" size={30} />
+        </div>
+        <strong style={{ color: 'var(--text)' }}>Start with one sentence.</strong><br />
+        Try "ran 5k in 24 min", "3x5 squat at 80kg", or "hiked 8h in Hawaii".
       </div>
     )
   }
@@ -1332,9 +1491,10 @@ function LogTab({ entries, onDelete }) {
           : new Date(`${sess.localDate}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
         return (
           <div key={sess.sessionId}>
-            <p style={S.sessionLabel}>
-              {dateLabel} · {sess.entries.length} {sess.entries.length === 1 ? 'entry' : 'entries'}
-            </p>
+            <div style={S.sessionLabel}>
+              <span style={S.sessionDate}>{dateLabel}</span>
+              <span style={S.sessionSpan}>{fmtSessionRange(sess)}</span>
+            </div>
             {entriesNewestFirst.map((e) => (
               <EntryCard key={e.id} entry={e} onDelete={onDelete} />
             ))}
@@ -1346,8 +1506,8 @@ function LogTab({ entries, onDelete }) {
 }
 
 // ---------------------------------------------------------------------------
-// Streak heatmap — hand-rolled SVG, NO recharts, so it works offline. 53×7
-// calendar; days with any entry tint with the accent.
+// Streak heatmap — hand-rolled SVG. 53×7 calendar; days with any entry tint
+// with the accent.
 // ---------------------------------------------------------------------------
 
 function Heatmap({ entries }) {
@@ -1387,32 +1547,161 @@ function Heatmap({ entries }) {
 }
 
 // ---------------------------------------------------------------------------
-// Insights tab — recharts donut + volume bar by category, e1RM PRs, cardio
-// bests, streak heatmap. recharts is NOT offline-precached, so when offline we
-// render only the heatmap (from cached data) and an explanatory banner.
+// Insights tab — pure React/CSS widgets so the app has no chart runtime to
+// load, cache, or fail offline.
 // ---------------------------------------------------------------------------
 
-function InsightsTab({ entries, online }) {
-  const split = useMemo(() => categorySplit(entries), [entries])
-  const volume = useMemo(() => volumeByDay(entries), [entries])
+function startOfWeekTs(ts) {
+  const d = new Date(ts)
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - d.getDay())
+  return d.getTime()
+}
+
+function entryVolume(entry) {
+  const fam = categoryFamily(entry.category)
+  if (fam === 'strength') {
+    return (entry.metrics?.sets || []).reduce((sum, s) => sum + ((s.weight_kg || 0) * (s.reps || 0)), 0)
+  }
+  if (fam === 'cardio') return (entry.metrics?.distance_m || 0) / 1000
+  return (entry.metrics?.duration_s || 0) / 60
+}
+
+function weeklyVolumeByCategory(entries) {
+  const now = Date.now()
+  const currentWeek = startOfWeekTs(now)
+  const weeks = Array.from({ length: 6 }, (_, i) => {
+    const ts = currentWeek - (5 - i) * 7 * 24 * 60 * 60 * 1000
+    return {
+      ts,
+      label: new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+      values: {},
+    }
+  })
+  const byTs = new Map(weeks.map((w) => [w.ts, w]))
+  for (const entry of entries || []) {
+    const weekTs = startOfWeekTs(entry.ts)
+    const week = byTs.get(weekTs)
+    if (!week) continue
+    const amount = entryVolume(entry)
+    if (amount > 0) {
+      week.values[entry.category] = Math.round(((week.values[entry.category] || 0) + amount) * 10) / 10
+    }
+  }
+  return weeks
+}
+
+function categoryStats(entries) {
+  const sessions = groupSessions(entries)
+  const byCategory = new Map()
+  for (const entry of entries || []) {
+    const cat = CATEGORIES[entry.category] ? entry.category : 'other'
+    if (!byCategory.has(cat)) {
+      byCategory.set(cat, {
+        category: cat,
+        label: CATEGORIES[cat].label,
+        color: CATEGORIES[cat].color,
+        entries: 0,
+        sessions: new Set(),
+        strengthVolume: 0,
+        distanceKm: 0,
+        durationMin: 0,
+      })
+    }
+    const row = byCategory.get(cat)
+    row.entries += 1
+    const session = sessions.find((s) => s.entries.some((e) => e.id === entry.id))
+    if (session) row.sessions.add(session.sessionId)
+    const fam = categoryFamily(cat)
+    if (fam === 'strength') row.strengthVolume += entryVolume(entry)
+    else if (fam === 'cardio') {
+      row.distanceKm += (entry.metrics?.distance_m || 0) / 1000
+      row.durationMin += (entry.metrics?.duration_s || 0) / 60
+    } else {
+      row.durationMin += (entry.metrics?.duration_s || 0) / 60
+    }
+  }
+  return [...byCategory.values()]
+    .map((row) => ({ ...row, sessions: row.sessions.size }))
+    .sort((a, b) => b.entries - a.entries)
+}
+
+function CategoryVolumeBars({ weeks }) {
+  const totals = new Map()
+  for (const week of weeks) {
+    for (const [category, value] of Object.entries(week.values)) {
+      totals.set(category, (totals.get(category) || 0) + value)
+    }
+  }
+  const rows = [...totals.entries()]
+    .map(([category, total]) => ({
+      category,
+      total: Math.round(total * 10) / 10,
+      label: CATEGORIES[category]?.label || category,
+      color: CATEGORIES[category]?.color || '#a1a1aa',
+    }))
+    .sort((a, b) => b.total - a.total)
+  const max = Math.max(0, ...rows.map((r) => r.total))
+  if (rows.length === 0 || max <= 0) {
+    return <div style={{ ...S.empty, padding: '18px 8px' }}>No numeric volume this week yet.</div>
+  }
+  return (
+    <div style={S.barList}>
+      {rows.map((row) => (
+        <div key={row.category} style={S.barRow}>
+          <span style={S.barLabel}>{row.label}</span>
+          <div style={S.barTrack}>
+            <div style={S.barFill(row.color, (row.total / max) * 100)} />
+          </div>
+          <span style={{ ...S.barLabel, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.total}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CategoryStats({ stats }) {
+  if (stats.length === 0) {
+    return <div style={{ ...S.empty, padding: '18px 8px' }}>No category data yet.</div>
+  }
+  return (
+    <div style={S.statGrid}>
+      {stats.map((row) => {
+        const fam = categoryFamily(row.category)
+        const volume = fam === 'strength'
+          ? `${Math.round(row.strengthVolume)} kg-reps`
+          : fam === 'cardio'
+            ? `${Math.round(row.distanceKm * 10) / 10} km`
+            : `${Math.round(row.durationMin)} min`
+        return (
+          <div key={row.category} style={S.statTile}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <SportIcon name={CATEGORIES[row.category].icon} color={row.color} size={18} />
+              <span style={S.statLabel}>{row.label}</span>
+            </div>
+            <div style={S.statValue}>{volume}</div>
+            <div style={S.statLabel}>{row.sessions} session{row.sessions === 1 ? '' : 's'} · {row.entries} entr{row.entries === 1 ? 'y' : 'ies'}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function InsightsTab({ entries }) {
+  const weeks = useMemo(() => weeklyVolumeByCategory(entries), [entries])
+  const stats = useMemo(() => categoryStats(entries), [entries])
   const prs = useMemo(() => strengthPRs(entries), [entries])
   const cardio = useMemo(() => cardioBests(entries), [entries])
   const streak = useMemo(() => currentStreak(entries), [entries])
 
-  // Which categories appear in the volume data → one stacked bar series each.
-  const volCats = useMemo(() => {
-    const set = new Set()
-    for (const row of volume) {
-      for (const k of Object.keys(row)) if (k !== 'date') set.add(k)
-    }
-    return [...set]
-  }, [volume])
-
   if (entries.length === 0) {
     return (
       <div style={S.empty}>
-        Log a few activities and your category split, volume trend, PRs, and
-        streak will fill in here.
+        <div style={S.emptyIcon}>
+          <SportIcon name="heartbeat" color="var(--accent)" size={30} />
+        </div>
+        Log a few activities and your weekly volume, category stats, PRs, and streak will fill in here.
       </div>
     )
   }
@@ -1428,58 +1717,17 @@ function InsightsTab({ entries, online }) {
         <Heatmap entries={entries} />
       </div>
 
-      {!online && (
-        <div style={S.banner}>
-          Charts need a connection (the charting library isn't cached for
-          offline). Your streak and heatmap above work offline from saved data.
-        </div>
-      )}
+      <div style={S.chartCard}>
+        <h3 style={S.chartTitle}>Weekly volume</h3>
+        <p style={S.chartSub}>Strength = kg-reps, cardio = km, other = minutes across the last 6 weeks.</p>
+        <CategoryVolumeBars weeks={weeks} />
+      </div>
 
-      {online && (
-        <>
-          <div style={S.chartCard}>
-            <h3 style={S.chartTitle}>By category</h3>
-            <p style={S.chartSub}>Share of logged activities.</p>
-            <div style={{ width: '100%', height: 220 }}>
-              <ResponsiveContainer>
-                <PieChart>
-                  <Pie data={split} dataKey="count" nameKey="label" innerRadius={55} outerRadius={85} paddingAngle={2}>
-                    {split.map((s) => <Cell key={s.category} fill={s.color} />)}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)' }}
-                    formatter={(v, n) => [`${v}`, n]}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {volume.length > 0 && (
-            <div style={S.chartCard}>
-              <h3 style={S.chartTitle}>Volume over time</h3>
-              <p style={S.chartSub}>Strength = kg·reps, cardio = km, other = minutes — stacked per day.</p>
-              <div style={{ width: '100%', height: 220 }}>
-                <ResponsiveContainer>
-                  <BarChart data={volume} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--muted)' }} tickFormatter={(d) => d.slice(5)} />
-                    <YAxis tick={{ fontSize: 10, fill: 'var(--muted)' }} />
-                    <Tooltip
-                      contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)' }}
-                    />
-                    {volCats.map((c) => (
-                      <Bar key={c} dataKey={c} stackId="v"
-                        fill={CATEGORIES[c]?.color || '#a1a1aa'} name={CATEGORIES[c]?.label || c} />
-                    ))}
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          )}
-        </>
-      )}
+      <div style={S.chartCard}>
+        <h3 style={S.chartTitle}>Category stats</h3>
+        <p style={S.chartSub}>Sessions and useful totals by activity type.</p>
+        <CategoryStats stats={stats} />
+      </div>
 
       {prs.length > 0 && (
         <div style={S.chartCard}>
@@ -1547,14 +1795,37 @@ function InsightsTab({ entries, online }) {
 // ---------------------------------------------------------------------------
 
 function AllTab({ entries, onDelete }) {
-  const sorted = useMemo(() => [...entries].sort((a, b) => b.ts - a.ts), [entries])
+  const sessions = useMemo(() => groupSessions(entries).reverse(), [entries])
   if (entries.length === 0) {
-    return <div style={S.empty}>No entries yet.</div>
+    return (
+      <div style={S.empty}>
+        <div style={S.emptyIcon}>
+          <SportIcon name="sparkles" color="var(--accent)" size={30} />
+        </div>
+        No entries yet.
+      </div>
+    )
   }
+  const todayIso = localDate()
   return (
     <div>
       <p style={S.cardSub}>{entries.length} total {entries.length === 1 ? 'entry' : 'entries'}.</p>
-      {sorted.map((e) => <EntryCard key={e.id} entry={e} onDelete={onDelete} />)}
+      {sessions.map((sess) => {
+        const dateLabel = sess.localDate === todayIso
+          ? 'Today'
+          : new Date(`${sess.localDate}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+        return (
+          <div key={sess.sessionId}>
+            <div style={S.sessionLabel}>
+              <span style={S.sessionDate}>{dateLabel}</span>
+              <span style={S.sessionSpan}>{fmtSessionRange(sess)}</span>
+            </div>
+            {[...sess.entries].sort((a, b) => b.ts - a.ts).map((e) => (
+              <EntryCard key={e.id} entry={e} onDelete={onDelete} />
+            ))}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -1569,10 +1840,14 @@ export default function App({ appId, token }) {
   const [entries, setEntries] = useState(null)
   const [bootStatus, setBootStatus] = useState('loading')
   const syncStatus = useSyncStatus(store)
+  const saveQueueRef = useRef({ inFlight: false, pending: null })
+  const successTimerRef = useRef(null)
 
   // Composer + parse state.
   const [input, setInput] = useState('')
   const [parsing, setParsing] = useState(false)
+  const [parseError, setParseError] = useState('')
+  const [successFlash, setSuccessFlash] = useState('')
   const [pendingDraft, setPendingDraft] = useState(null) // { draft, ambiguous, clarification, raw, source }
   const [deletePending, setDeletePending] = useState(null) // entry id awaiting confirm
 
@@ -1583,16 +1858,21 @@ export default function App({ appId, token }) {
     ;(async () => {
       const loaded = await store.get('entries.json')
       if (cancelled) return
-      if (Array.isArray(loaded)) {
-        setEntries(loaded)
+      const normalizedLoaded = normalizeStoredEntries(loaded)
+      if (normalizedLoaded.length > 0) {
+        setEntries(normalizedLoaded)
         setBootStatus('ready')
+        if (Array.isArray(loaded) && JSON.stringify(loaded) !== JSON.stringify(normalizedLoaded)) {
+          store.set('entries.json', normalizedLoaded).then((r) => syncStatus.bump(r))
+        }
         return
       }
-      // No entries yet — try migrating an old gym state.json.
+      // No usable entries yet — try migrating an old gym state.json. This also
+      // covers an empty entries.json created before migration finished.
       const legacy = await store.get('state.json')
       if (cancelled) return
       if (legacy && Array.isArray(legacy.history) && legacy.history.length > 0) {
-        const migrated = migrateLegacyState(legacy)
+        const migrated = normalizeStoredEntries(migrateLegacyState(legacy))
         setEntries(migrated)
         setBootStatus('ready')
         // Persist the migration so we don't re-run it next boot.
@@ -1612,24 +1892,31 @@ export default function App({ appId, token }) {
   }, [store])
 
   const bumpSync = syncStatus.bump
-  // Append-only write: optimistic local update + write-through.
-  const persist = useCallback((nextEntries) => {
-    setEntries(nextEntries)
-    ;(async () => {
+  const flushSaves = useCallback(async () => {
+    const q = saveQueueRef.current
+    if (q.inFlight) return
+    q.inFlight = true
+    while (q.pending) {
+      const nextEntries = q.pending
+      q.pending = null
       try {
         const result = await store.set('entries.json', nextEntries)
         bumpSync(result)
       } catch (err) {
-        // Never silently swallow a failed write behind the optimistic update —
-        // surface it so the sync pill doesn't read "synced" while the entry
-        // only lives in memory. (Offline writes are queued, not thrown, by the
-        // runtime; a throw here is a real backend error.)
         // eslint-disable-next-line no-console
         console.error('entries save failed', err)
         bumpSync({ synced: false, error: true })
       }
-    })()
+    }
+    q.inFlight = false
   }, [store, bumpSync])
+
+  // Append-only write: optimistic local update + serialized write-through.
+  const persist = useCallback((nextEntries) => {
+    setEntries(nextEntries)
+    saveQueueRef.current.pending = nextEntries
+    flushSaves()
+  }, [flushSaves])
 
   // Commit a confirmed draft as a normalized, SI-stored entry. Session is
   // assigned against the existing entries so the 4h-gap rule clusters it.
@@ -1645,6 +1932,12 @@ export default function App({ appId, token }) {
     persist([...(entries || []), entry])
     setPendingDraft(null)
     setTab('log')
+    setSuccessFlash('Logged.')
+    if (successTimerRef.current) clearTimeout(successTimerRef.current)
+    successTimerRef.current = setTimeout(() => {
+      setSuccessFlash('')
+      successTimerRef.current = null
+    }, 1400)
   }, [entries, pendingDraft, persist])
 
   const deleteEntry = useCallback((id) => {
@@ -1655,6 +1948,8 @@ export default function App({ appId, token }) {
   const handleSend = useCallback(async () => {
     const text = input.trim()
     if (!text) return
+    setParseError('')
+    setSuccessFlash('')
 
     // Offline → skip the model, open a blank confirm card (manual fallback).
     if (!navigator.onLine) {
@@ -1695,20 +1990,15 @@ export default function App({ appId, token }) {
       })
       setInput('')
     } catch {
-      // Parse failed (network, non-JSON, or an AI error event) → still give the
-      // user an editable card (never drop the entry, never auto-commit garbage).
-      // Pre-fill the raw text as a note.
-      setPendingDraft({
-        draft: { category: 'other', activity: '', metrics: { note: text } },
-        ambiguous: true,
-        clarification: 'Couldn\'t read that automatically — fill in the details.',
-        raw: text, source: 'manual',
-      })
-      setInput('')
+      setParseError('I could not parse that. Your text is still here; edit it or try again.')
     } finally {
       setParsing(false)
     }
   }, [input, entries, token])
+
+  useEffect(() => () => {
+    if (successTimerRef.current) clearTimeout(successTimerRef.current)
+  }, [])
 
   if (bootStatus === 'loading') {
     return <div style={S.root}><div style={S.loading}>Loading…</div></div>
@@ -1744,7 +2034,7 @@ export default function App({ appId, token }) {
                 <LogTab entries={entries} onDelete={(id) => setDeletePending(id)} />
               )}
               {tab === 'insights' && (
-                <InsightsTab entries={entries} online={syncStatus.online} />
+                <InsightsTab entries={entries} />
               )}
               {tab === 'all' && (
                 <AllTab entries={entries} onDelete={(id) => setDeletePending(id)} />
@@ -1759,6 +2049,8 @@ export default function App({ appId, token }) {
         <Composer
           value={input} onChange={setInput} onSend={handleSend}
           busy={parsing} online={syncStatus.online}
+          error={parseError} onDismissError={() => setParseError('')}
+          success={successFlash}
         />
       )}
 
