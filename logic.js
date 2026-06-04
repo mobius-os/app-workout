@@ -138,11 +138,41 @@ export function extractFirstJsonObject(text) {
 //
 // parsed shape (from /api/ai):
 //   { category, activity, icon?, metrics, ambiguous?, clarification? }
+// or for multi-activity input:
+//   { entries: [{ category, activity, metrics, ambiguous?, clarification? }],
+//     ambiguous?, clarification? }
 //   strength metrics: { sets: [{ weight, reps, unit }] }
 //   cardio metrics:   { duration: {value,unit}, distance: {value,unit},
 //                       location, elevation: {value,unit} }
 //   other metrics:    { duration: {value,unit}, location, note }
 // ---------------------------------------------------------------------------
+
+export function draftFromParsed(parsed, fallback = {}) {
+  const entry = parsed && typeof parsed === 'object' ? parsed : {}
+  return {
+    draft: {
+      category: CATEGORY_KEYS.includes(entry.category) ? entry.category : 'other',
+      activity: typeof entry.activity === 'string' ? entry.activity : '',
+      metrics: (entry.metrics && typeof entry.metrics === 'object') ? entry.metrics : {},
+    },
+    ambiguous: !!(entry.ambiguous || fallback.ambiguous),
+    clarification: typeof entry.clarification === 'string' && entry.clarification.trim()
+      ? entry.clarification.trim()
+      : (typeof fallback.clarification === 'string' ? fallback.clarification : ''),
+  }
+}
+
+export function draftsFromParsedPayload(payload) {
+  if (!payload || typeof payload !== 'object') return []
+  const fallback = {
+    ambiguous: !!payload.ambiguous,
+    clarification: typeof payload.clarification === 'string' ? payload.clarification : '',
+  }
+  const rows = Array.isArray(payload.entries) ? payload.entries : [payload]
+  return rows
+    .filter((row) => row && typeof row === 'object')
+    .map((row) => draftFromParsed(row, fallback))
+}
 
 export function normalizeEntry(parsed, opts = {}) {
   const tsValue = Number(opts.ts ?? Date.now())

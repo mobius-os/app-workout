@@ -18,6 +18,7 @@ const TEST_EXPORTS = [
   'normalizeEntry',
   'normalizeStoredEntries',
   'mergeEntriesForSave',
+  'draftsFromParsedPayload',
   'groupSessions',
   'summarizeMetrics',
 ]

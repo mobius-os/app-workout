@@ -146,11 +146,41 @@ function extractFirstJsonObject(text) {
 //
 // parsed shape (from /api/ai):
 //   { category, activity, icon?, metrics, ambiguous?, clarification? }
+// or for multi-activity input:
+//   { entries: [{ category, activity, metrics, ambiguous?, clarification? }],
+//     ambiguous?, clarification? }
 //   strength metrics: { sets: [{ weight, reps, unit }] }
 //   cardio metrics:   { duration: {value,unit}, distance: {value,unit},
 //                       location, elevation: {value,unit} }
 //   other metrics:    { duration: {value,unit}, location, note }
 // ---------------------------------------------------------------------------
+
+function draftFromParsed(parsed, fallback = {}) {
+  const entry = parsed && typeof parsed === 'object' ? parsed : {}
+  return {
+    draft: {
+      category: CATEGORY_KEYS.includes(entry.category) ? entry.category : 'other',
+      activity: typeof entry.activity === 'string' ? entry.activity : '',
+      metrics: (entry.metrics && typeof entry.metrics === 'object') ? entry.metrics : {},
+    },
+    ambiguous: !!(entry.ambiguous || fallback.ambiguous),
+    clarification: typeof entry.clarification === 'string' && entry.clarification.trim()
+      ? entry.clarification.trim()
+      : (typeof fallback.clarification === 'string' ? fallback.clarification : ''),
+  }
+}
+
+function draftsFromParsedPayload(payload) {
+  if (!payload || typeof payload !== 'object') return []
+  const fallback = {
+    ambiguous: !!payload.ambiguous,
+    clarification: typeof payload.clarification === 'string' ? payload.clarification : '',
+  }
+  const rows = Array.isArray(payload.entries) ? payload.entries : [payload]
+  return rows
+    .filter((row) => row && typeof row === 'object')
+    .map((row) => draftFromParsed(row, fallback))
+}
 
 function normalizeEntry(parsed, opts = {}) {
   const tsValue = Number(opts.ts ?? Date.now())
@@ -614,6 +644,7 @@ export {
   normalizeEntry,
   normalizeStoredEntries,
   mergeEntriesForSave,
+  draftsFromParsedPayload,
   groupSessions,
   summarizeMetrics,
 }
@@ -813,10 +844,11 @@ async function* streamAi(messages, system, token) {
   }
 }
 
-// The JSON-only system prompt. The model picks a category KEY from the enum
-// (the app owns the icon+color), extracts an activity name + metrics in the
-// shape that matches the category family, and flags ambiguity. Current-session
-// context is appended so "another set with 90" resolves against the last lift.
+// The JSON-only system prompt. The model picks category KEYs from the enum
+// (the app owns icon+color), extracts one or more activity entries + metrics in
+// the shape that matches each category family, and flags ambiguity per entry.
+// Current-session context is appended so "another set with 90" resolves
+// against the last lift.
 const AI_SYSTEM = `You convert a person's natural-language description of a physical activity into structured JSON. Return ONLY valid JSON, no markdown fences, no prose.
 
 Pick a category KEY from exactly this list (do not invent new keys):
@@ -832,16 +864,26 @@ Metrics shape depends on the category family:
 - cardio family (cardio/running/cycling/swimming/rowing/hiking) → {"duration": {"value": number, "unit": "s"|"min"|"h"}, "distance": {"value": number, "unit": "m"|"km"|"mi"}, "elevation": {"value": number, "unit": "m"|"km"}, "location": "string"}. Include only the fields the user mentioned.
 - other → {"duration": {"value": number, "unit": "s"|"min"|"h"}, "location": "string", "note": "string"}.
 
+If the user describes multiple activities in one message, return one entry per activity in chronological order. Do not collapse "deadlift, climbing, bench" into one entry. Preserve clear entries even when a later entry needs clarification.
+
 Return this exact top-level shape:
 {
-  "category": "<key>",
-  "activity": "<short human name, e.g. 'Deadlift', 'Trail run', 'Hike'>",
-  "metrics": { ... shape above ... },
+  "entries": [
+    {
+      "category": "<key>",
+      "activity": "<short human name, e.g. 'Deadlift', 'Climbing', 'Bench press'>",
+      "metrics": { ... shape above ... },
+      "ambiguous": <true|false>,
+      "clarification": "<a short question to ask for this entry ONLY if ambiguous, else empty string>"
+    }
+  ],
   "ambiguous": <true|false>,
-  "clarification": "<a short question to ask the user ONLY if ambiguous, else empty string>"
+  "clarification": "<one short overall question ONLY if every entry shares the same ambiguity, else empty string>"
 }
 
-Set "ambiguous": true and provide a "clarification" question when the entry is too vague to log confidently (e.g. "did a workout" with no detail, or a weight with no exercise and no prior context). When prior-session context is given and the user says something like "another set with 90", reuse the most recent activity and category from that context and fill the new weight; that is NOT ambiguous.`
+Set "ambiguous": true and provide a "clarification" question when an entry is too vague to log confidently (e.g. "did a workout" with no detail, "bench press with varying sizes of sets" without the reps/weights, or a weight with no exercise and no prior context). When prior-session context is given and the user says something like "another set with 90", reuse the most recent activity and category from that context and fill the new weight; that is NOT ambiguous.
+
+Example: "5 sets of deadlifts, 1.5h climbing, 5 sets of bench press with varying sizes of sets" should produce three entries: Deadlift strength with five sets if reps/weight were stated, Climbing sport with duration 1.5h, and Bench press strength marked ambiguous if the set breakdown is missing.`
 
 function buildUserMessage(text, ctx) {
   if (!ctx || !ctx.entries || ctx.entries.length === 0) {
@@ -1218,7 +1260,9 @@ function ConfirmModal({ title, body, confirmLabel, onConfirm, onCancel }) {
 // Editing here mutates a local draft; Save runs normalizeEntry on commit.
 // ---------------------------------------------------------------------------
 
-function ConfirmCard({ draft, ambiguous, clarification, onCommit, onCancel }) {
+function ConfirmCard({
+  draft, ambiguous, clarification, onCommit, onCancel, position = 1, total = 1,
+}) {
   const [category, setCategory] = useState(draft.category)
   const [activity, setActivity] = useState(draft.activity)
   const fam = categoryFamily(category)
@@ -1268,11 +1312,18 @@ function ConfirmCard({ draft, ambiguous, clarification, onCommit, onCancel }) {
 
   return (
     <div style={{ ...S.card, borderColor: ambiguous ? 'var(--accent)' : 'var(--border)' }}>
-      <h3 style={S.cardTitle}>{ambiguous ? 'Check this one' : 'Confirm entry'}</h3>
+      <h3 style={S.cardTitle}>
+        {ambiguous ? 'Check this one' : 'Confirm entry'}
+        {total > 1 ? ` · ${position}/${total}` : ''}
+      </h3>
       {ambiguous && clarification ? (
         <p style={S.cardSub}>{clarification}</p>
       ) : (
-        <p style={S.cardSub}>Tweak anything, then save it to your log.</p>
+        <p style={S.cardSub}>
+          {total > 1
+            ? 'Tweak anything, then save this part and review the next one.'
+            : 'Tweak anything, then save it to your log.'}
+        </p>
       )}
 
       <label style={S.label}>Activity</label>
@@ -1395,7 +1446,9 @@ function ConfirmCard({ draft, ambiguous, clarification, onCommit, onCancel }) {
       )}
 
       <div style={{ height: '16px' }} />
-      <button style={S.btnPrimary} onClick={handleCommit} aria-label="Save entry">Save to log</button>
+      <button style={S.btnPrimary} onClick={handleCommit} aria-label="Save entry">
+        {total > 1 && position < total ? 'Save and review next' : 'Save to log'}
+      </button>
       <div style={{ height: '10px' }} />
       <button style={{ ...S.btnSecondary, width: '100%' }} onClick={onCancel} aria-label="Discard entry">Discard</button>
     </div>
@@ -1871,7 +1924,7 @@ export default function App({ appId, token }) {
   const [parsing, setParsing] = useState(false)
   const [parseError, setParseError] = useState('')
   const [successFlash, setSuccessFlash] = useState('')
-  const [pendingDraft, setPendingDraft] = useState(null) // { draft, ambiguous, clarification, raw, source }
+  const [pendingDrafts, setPendingDrafts] = useState([]) // [{ draft, ambiguous, clarification, raw, source }]
   const [deletePending, setDeletePending] = useState(null) // entry id awaiting confirm
 
   // Initial load. entries.json is the append-only log. If it's missing but a
@@ -1953,27 +2006,30 @@ export default function App({ appId, token }) {
     flushSaves()
   }, [flushSaves])
 
+  const pendingDraft = pendingDrafts[0] || null
+
   // Commit a confirmed draft as a normalized, SI-stored entry. Session is
   // assigned against the existing entries so the 4h-gap rule clusters it.
   const commitDraft = useCallback((edited) => {
+    const activeDraft = pendingDrafts[0]
     const ts = Date.now()
     const sessionId = assignSession(entries || [], ts)
     const entry = normalizeEntry(edited, {
       ts, sessionId,
-      raw: pendingDraft?.raw || '',
-      source: pendingDraft?.source || 'ai',
+      raw: activeDraft?.raw || '',
+      source: activeDraft?.source || 'ai',
       confirmed: true,
     })
     persist([...(entries || []), entry])
-    setPendingDraft(null)
+    setPendingDrafts((prev) => prev.slice(1))
     setTab('log')
-    setSuccessFlash('Logged.')
+    setSuccessFlash(pendingDrafts.length > 1 ? 'Logged — review the next part.' : 'Logged.')
     if (successTimerRef.current) clearTimeout(successTimerRef.current)
     successTimerRef.current = setTimeout(() => {
       setSuccessFlash('')
       successTimerRef.current = null
     }, 1400)
-  }, [entries, pendingDraft, persist])
+  }, [entries, pendingDrafts, persist])
 
   const deleteEntry = useCallback((id) => {
     persist((entries || []).filter((e) => e.id !== id), { deletedIds: [id] })
@@ -1988,12 +2044,12 @@ export default function App({ appId, token }) {
 
     // Offline → skip the model, open a blank confirm card (manual fallback).
     if (!navigator.onLine) {
-      setPendingDraft({
+      setPendingDrafts([{
         draft: { category: 'other', activity: '', metrics: {} },
         ambiguous: true,
         clarification: 'Offline — fill this in manually.',
         raw: text, source: 'manual',
-      })
+      }])
       setInput('')
       return
     }
@@ -2011,18 +2067,13 @@ export default function App({ appId, token }) {
       }
       const parsed = extractFirstJsonObject(full)
       if (!parsed) throw new Error('no-json')
-      setPendingDraft({
-        draft: {
-          category: CATEGORY_KEYS.includes(parsed.category) ? parsed.category : 'other',
-          activity: parsed.activity || '',
-          metrics: parsed.metrics || {},
-        },
-        ambiguous: !!parsed.ambiguous,
-        // Coerce to string — a non-string clarification (e.g. the model returns
-        // an object) would throw when React renders it in the confirm card.
-        clarification: typeof parsed.clarification === 'string' ? parsed.clarification : '',
-        raw: text, source: 'ai',
-      })
+      const drafts = draftsFromParsedPayload(parsed).map((item) => ({
+        ...item,
+        raw: text,
+        source: 'ai',
+      }))
+      if (drafts.length === 0) throw new Error('empty-drafts')
+      setPendingDrafts(drafts)
       setInput('')
     } catch {
       setParseError('I could not parse that. Your text is still here; edit it or try again.')
@@ -2060,13 +2111,15 @@ export default function App({ appId, token }) {
               draft={pendingDraft.draft}
               ambiguous={pendingDraft.ambiguous}
               clarification={pendingDraft.clarification}
+              position={1}
+              total={pendingDrafts.length}
               onCommit={commitDraft}
               onCancel={() => {
                 // Restore what the user typed — a successful parse clears the
                 // composer, so a bare setPendingDraft(null) would lose the
                 // original text and force them to retype it to edit/retry.
                 if (pendingDraft?.raw) setInput(pendingDraft.raw)
-                setPendingDraft(null)
+                setPendingDrafts([])
               }}
             />
           ) : (

@@ -13,7 +13,7 @@ import {
   normalizeEntry, assignSession, currentSession, groupSessions,
   epley1RM, strengthPRs, cardioBests, migrateLegacyState,
   SESSION_GAP_MS, toKg, summarizeMetrics, extractFirstJsonObject, localDate,
-  mergeEntriesForSave,
+  mergeEntriesForSave, draftsFromParsedPayload,
 } from '../logic.js'
 import { buildEntry } from '../build-entry.mjs'
 
@@ -34,6 +34,50 @@ test('extractFirstJsonObject: brace inside a string does not break balance', () 
 test('extractFirstJsonObject: returns null when there is no JSON', () => {
   assert.equal(extractFirstJsonObject('no json here'), null)
   assert.equal(extractFirstJsonObject(42), null)
+})
+
+test('draftsFromParsedPayload expands a multi-activity workout into review drafts', () => {
+  const drafts = draftsFromParsedPayload({
+    entries: [
+      {
+        category: 'strength',
+        activity: 'Deadlift',
+        metrics: { sets: Array.from({ length: 5 }, () => ({ weight: 140, reps: 5, unit: 'kg' })) },
+      },
+      {
+        category: 'sport',
+        activity: 'Climbing',
+        metrics: { duration: { value: 1.5, unit: 'h' } },
+      },
+      {
+        category: 'strength',
+        activity: 'Bench press',
+        ambiguous: true,
+        clarification: 'What were the reps and weights for the five bench sets?',
+        metrics: { sets: [] },
+      },
+    ],
+  })
+
+  assert.equal(drafts.length, 3)
+  assert.equal(drafts[0].draft.activity, 'Deadlift')
+  assert.equal(drafts[0].draft.metrics.sets.length, 5)
+  assert.equal(drafts[1].draft.category, 'sport')
+  assert.deepEqual(drafts[1].draft.metrics.duration, { value: 1.5, unit: 'h' })
+  assert.equal(drafts[2].ambiguous, true)
+  assert.match(drafts[2].clarification, /bench/i)
+})
+
+test('draftsFromParsedPayload preserves legacy single-entry parse payloads', () => {
+  const drafts = draftsFromParsedPayload({
+    category: 'running',
+    activity: 'Run',
+    metrics: { distance: { value: 5, unit: 'km' } },
+  })
+
+  assert.equal(drafts.length, 1)
+  assert.equal(drafts[0].draft.category, 'running')
+  assert.equal(drafts[0].ambiguous, false)
 })
 
 test('normalizeEntry: negative weight is clamped to 0', () => {
