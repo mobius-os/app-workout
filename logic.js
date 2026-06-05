@@ -324,6 +324,94 @@ export function mergeEntriesForSave(localEntries, remoteEntries, deletedIds = []
 }
 
 // ---------------------------------------------------------------------------
+// In-progress session draft. The embedded agent writes current_session.json;
+// the UI commits it to entries.json only when the user presses Finish session.
+// ---------------------------------------------------------------------------
+
+export function normalizeCurrentSession(session, now = Date.now()) {
+  if (!session || typeof session !== 'object') return null
+  const startedAtRaw = Number(session.startedAt ?? session.startTs ?? now)
+  const startedAt = Number.isFinite(startedAtRaw) ? startedAtRaw : now
+  const id = textOrNull(session.id) || `session-${startedAt}`
+  const entries = normalizeStoredEntries(
+    (Array.isArray(session.entries) ? session.entries : [])
+      .map((entry, index) => ({
+        ...entry,
+        ts: Number.isFinite(Number(entry?.ts)) ? Number(entry.ts) : startedAt + index * 1000,
+        sessionId: textOrNull(entry?.sessionId) || id,
+      })),
+  ).map((entry, index) => ({
+    ...entry,
+    sessionId: id,
+    ts: startedAt + index * 1000,
+    localDate: localDate(new Date(startedAt)),
+    source: entry.source || 'ai',
+    confirmed: entry.confirmed !== false,
+  }))
+
+  return {
+    id,
+    startedAt,
+    localDate: textOrNull(session.localDate) || localDate(new Date(startedAt)),
+    status: textOrNull(session.status) || 'active',
+    entries,
+    pendingQuestion: textOrNull(session.pendingQuestion),
+  }
+}
+
+export function sessionEntryMissing(entry) {
+  if (!entry || typeof entry !== 'object') return 'entry'
+  const fam = categoryFamily(entry.category)
+  const activity = textOrNull(entry.activity)
+  const genericActivity = activity === CATEGORIES[entry.category]?.label &&
+    ['strength', 'cardio', 'sport', 'other'].includes(entry.category)
+  if (!activity || genericActivity) return 'activity'
+  if (fam === 'strength') {
+    const sets = Array.isArray(entry.metrics?.sets) ? entry.metrics.sets : []
+    if (sets.length === 0) return `${activity} sets`
+    const incomplete = sets.find((set) => numberOrNull(set?.weight_kg) == null || numberOrNull(set?.reps) == null)
+    if (incomplete) return `${activity} reps and weight`
+    return null
+  }
+  if (fam === 'cardio') {
+    if (numberOrNull(entry.metrics?.duration_s) == null && numberOrNull(entry.metrics?.distance_m) == null) {
+      return `${activity} duration or distance`
+    }
+    return null
+  }
+  if (
+    numberOrNull(entry.metrics?.duration_s) == null &&
+    !textOrNull(entry.metrics?.note) &&
+    !textOrNull(entry.metrics?.location)
+  ) {
+    return `${activity} duration or note`
+  }
+  return null
+}
+
+export function sessionEntriesReady(entries) {
+  return normalizeStoredEntries(entries).filter((entry) => !sessionEntryMissing(entry))
+}
+
+export function currentSessionReady(session) {
+  const normalized = normalizeCurrentSession(session)
+  return !!(normalized && normalized.entries.length > 0 && normalized.entries.every((entry) => !sessionEntryMissing(entry)))
+}
+
+export function entriesFromCurrentSession(session) {
+  const normalized = normalizeCurrentSession(session)
+  if (!normalized || !currentSessionReady(normalized)) return []
+  return normalized.entries.map((entry, index) => ({
+    ...entry,
+    id: textOrNull(entry.id) || uid(),
+    ts: normalized.startedAt + index * 1000,
+    localDate: normalized.localDate,
+    sessionId: normalized.id,
+    confirmed: true,
+  }))
+}
+
+// ---------------------------------------------------------------------------
 // Session grouping — entries within SESSION_GAP_MS of each other (in time
 // order) share a sessionId. groupSessions takes the full append-only entries
 // list and returns derived session objects without mutating the entries.

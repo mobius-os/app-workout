@@ -332,6 +332,94 @@ function mergeEntriesForSave(localEntries, remoteEntries, deletedIds = []) {
 }
 
 // ---------------------------------------------------------------------------
+// In-progress session draft. The embedded agent writes current_session.json;
+// the UI commits it to entries.json only when the user presses Finish session.
+// ---------------------------------------------------------------------------
+
+function normalizeCurrentSession(session, now = Date.now()) {
+  if (!session || typeof session !== 'object') return null
+  const startedAtRaw = Number(session.startedAt ?? session.startTs ?? now)
+  const startedAt = Number.isFinite(startedAtRaw) ? startedAtRaw : now
+  const id = textOrNull(session.id) || `session-${startedAt}`
+  const entries = normalizeStoredEntries(
+    (Array.isArray(session.entries) ? session.entries : [])
+      .map((entry, index) => ({
+        ...entry,
+        ts: Number.isFinite(Number(entry?.ts)) ? Number(entry.ts) : startedAt + index * 1000,
+        sessionId: textOrNull(entry?.sessionId) || id,
+      })),
+  ).map((entry, index) => ({
+    ...entry,
+    sessionId: id,
+    ts: startedAt + index * 1000,
+    localDate: localDate(new Date(startedAt)),
+    source: entry.source || 'ai',
+    confirmed: entry.confirmed !== false,
+  }))
+
+  return {
+    id,
+    startedAt,
+    localDate: textOrNull(session.localDate) || localDate(new Date(startedAt)),
+    status: textOrNull(session.status) || 'active',
+    entries,
+    pendingQuestion: textOrNull(session.pendingQuestion),
+  }
+}
+
+function sessionEntryMissing(entry) {
+  if (!entry || typeof entry !== 'object') return 'entry'
+  const fam = categoryFamily(entry.category)
+  const activity = textOrNull(entry.activity)
+  const genericActivity = activity === CATEGORIES[entry.category]?.label &&
+    ['strength', 'cardio', 'sport', 'other'].includes(entry.category)
+  if (!activity || genericActivity) return 'activity'
+  if (fam === 'strength') {
+    const sets = Array.isArray(entry.metrics?.sets) ? entry.metrics.sets : []
+    if (sets.length === 0) return `${activity} sets`
+    const incomplete = sets.find((set) => numberOrNull(set?.weight_kg) == null || numberOrNull(set?.reps) == null)
+    if (incomplete) return `${activity} reps and weight`
+    return null
+  }
+  if (fam === 'cardio') {
+    if (numberOrNull(entry.metrics?.duration_s) == null && numberOrNull(entry.metrics?.distance_m) == null) {
+      return `${activity} duration or distance`
+    }
+    return null
+  }
+  if (
+    numberOrNull(entry.metrics?.duration_s) == null &&
+    !textOrNull(entry.metrics?.note) &&
+    !textOrNull(entry.metrics?.location)
+  ) {
+    return `${activity} duration or note`
+  }
+  return null
+}
+
+function sessionEntriesReady(entries) {
+  return normalizeStoredEntries(entries).filter((entry) => !sessionEntryMissing(entry))
+}
+
+function currentSessionReady(session) {
+  const normalized = normalizeCurrentSession(session)
+  return !!(normalized && normalized.entries.length > 0 && normalized.entries.every((entry) => !sessionEntryMissing(entry)))
+}
+
+function entriesFromCurrentSession(session) {
+  const normalized = normalizeCurrentSession(session)
+  if (!normalized || !currentSessionReady(normalized)) return []
+  return normalized.entries.map((entry, index) => ({
+    ...entry,
+    id: textOrNull(entry.id) || uid(),
+    ts: normalized.startedAt + index * 1000,
+    localDate: normalized.localDate,
+    sessionId: normalized.id,
+    confirmed: true,
+  }))
+}
+
+// ---------------------------------------------------------------------------
 // Session grouping — entries within SESSION_GAP_MS of each other (in time
 // order) share a sessionId. groupSessions takes the full append-only entries
 // list and returns derived session objects without mutating the entries.
@@ -667,6 +755,10 @@ export {
   normalizeEntry,
   normalizeStoredEntries,
   mergeEntriesForSave,
+  normalizeCurrentSession,
+  sessionEntryMissing,
+  currentSessionReady,
+  entriesFromCurrentSession,
   draftsFromParsedPayload,
   groupSessions,
   summarizeMetrics,
@@ -852,31 +944,42 @@ function makeStore(appId, token) {
 
 // ---------------------------------------------------------------------------
 // Embedded shell chat. Like the LaTeX app, Workout uses the real Möbius chat
-// iframe as the interaction surface. The sub-agent edits entries.json; the
-// mini-app refreshes structured state after each turn.
+// iframe as the interaction surface. The sub-agent edits current_session.json;
+// the mini-app commits it to entries.json when the user finishes the session.
 // ---------------------------------------------------------------------------
 
 function workoutAgentPrompt(appId) {
   return [
     `You are the Workout training-log sub-agent for Möbius app id ${appId}.`,
     '',
-    `Your job is to maintain /data/apps/${appId}/entries.json as the user's`,
-    'structured workout log. The user should talk to you naturally. Your',
-    'default action is to update the log, not to tell the user how to fill a',
-    'form. If details are missing, write the best-effort entry with null',
-    'numeric values, then ask a short follow-up question in chat.',
+    `Your job is to maintain /data/apps/${appId}/current_session.json as the`,
+    'active workout draft. The user should talk naturally. Your default action',
+    'is to update the current session, not to explain forms. The app has a',
+    'Finish session button that commits this draft into entries.json; do not',
+    'write entries.json for normal logging.',
     '',
-    'Always read the existing entries.json before writing. If it is missing,',
-    'treat it as an empty JSON array. Preserve existing entries unless the user',
-    'asks you to change or delete them. Write the whole JSON array back after',
-    'changes.',
+    'Always read current_session.json before writing. If it is missing/null,',
+    'create a new active session whose startedAt is the time of the first',
+    'activity the user describes, or now if no time is given. Preserve existing',
+    'draft entries unless the user asks you to change/delete them. Write the',
+    'whole current_session.json object back after changes.',
     '',
-    'Entry shape:',
+    'current_session.json shape:',
+    '{',
+    '  "id": "session-<startedAt>",',
+    '  "startedAt": 1780000000000,',
+    '  "localDate": "YYYY-MM-DD",',
+    '  "status": "active",',
+    '  "entries": [Entry, Entry],',
+    '  "pendingQuestion": "short missing-detail question or null"',
+    '}',
+    '',
+    'Entry shape inside entries:',
     '{',
     '  "id": "stable unique string",',
     '  "ts": 1780000000000,',
     '  "localDate": "YYYY-MM-DD",',
-    '  "sessionId": "s-<timestamp>",',
+    '  "sessionId": "session-<startedAt>",',
     '  "category": "strength|cardio|running|cycling|swimming|rowing|hiking|yoga|sport|other",',
     '  "activity": "Deadlift",',
     '  "icon": "barbell|heartbeat|run|bike|swimming|kayak|mountain|yoga|ball-football|sparkles",',
@@ -886,26 +989,37 @@ function workoutAgentPrompt(appId) {
     '  "confirmed": true',
     '}',
     '',
-    'Use the current date/time for new entries unless the user gives another',
-    'date/time. localDate is the user-facing local day. For now, grouping is',
-    'by localDate; sessionId can be "s-" plus the entry timestamp, or reused',
-    'for entries from the same message.',
+    'Use the session startedAt for the first entry, then +1000ms per additional',
+    'entry so ordering is stable. localDate is the user-facing local day.',
+    'All entries in one active workout share the same sessionId.',
     '',
-    'Metric rules:',
-    '- strength metrics: {"sets":[{"weight_kg": number|null, "reps": number|null, "unit":"kg"|"lb"}]}. Use null for unknown weight or reps. If the user says "three sets of deadlifts", write three set objects with null weight_kg and null reps.',
-    '- cardio/running/cycling/swimming/rowing/hiking metrics: {"duration_s": number|null, "distance_m": number|null, "elevation_m": number|null, "location": string|null}.',
-    '- yoga/sport/other metrics: {"duration_s": number|null, "location": string|null, "note": string|null}.',
+    'Required metric rules:',
+    '- strength metrics: {"sets":[{"weight_kg": number, "reps": number, "unit":"kg"|"lb"}]}. Strength requires exercise name, at least one set, and every set needs both reps and weight. Convert lb to weight_kg but keep unit as "lb" for display. If the user gives sets without reps/weight, ask before adding. If the user gives reps/weight without the exercise, ask before adding.',
+    '- cardio/running/cycling/swimming/rowing/hiking metrics: {"duration_s": number|null, "distance_m": number|null, "elevation_m": number|null, "location": string|null}. These require the activity plus at least one of duration_s or distance_m. Convert miles/mi/km/m to metres and hours/minutes/seconds to seconds.',
+    '- yoga/sport/other metrics: {"duration_s": number|null, "location": string|null, "note": string|null}. These require activity plus duration_s or a useful note/location.',
     '',
     'Icon keys by category: strength=barbell, cardio=heartbeat, running=run, cycling=bike, swimming=swimming, rowing=kayak, hiking=mountain, yoga=yoga, sport=ball-football, other=sparkles.',
     '',
-    'Example: if the user says "I have done three sets of deadlifts and one',
-    'hour climbing", append a Deadlift strength entry with three unknown sets',
-    'and a Climbing sport entry with duration_s 3600. Then ask "How many reps',
-    'did you do for the deadlift sets?" Do not wait to create the entries.',
+    'Question behavior:',
+    '- If a required field is missing, do not add an incomplete entry. Ask one',
+    '  concise follow-up question and set pendingQuestion to that question.',
+    '- If the runtime exposes AskUserQuestion, use it. If the runtime exposes',
+    '  request_user_input, use it. Otherwise ask in chat.',
+    '- When the user answers, update the pending activity in current_session.json',
+    '  rather than creating a duplicate.',
     '',
-    'When the user answers a follow-up, update the existing entry rather than',
-    'creating a duplicate. Keep unknown fields as null. Never use 0 to mean',
-    'unknown.',
+    'Examples:',
+    '- "I did 2 sets of deadlifts" -> ask for reps and weight; do not add yet.',
+    '- "I did two sets with 20 kg" -> ask which exercise; do not add yet.',
+    '- "I swam for 40 minutes" -> add Swimming with duration_s 2400.',
+    '- "I swam 20 miles" -> add Swimming with distance_m 32187.',
+    '- "3 sets of deadlift 5 reps at 120kg, then swam 40 minutes, hiked 8km, and ran a marathon" -> split into four entries in the same current session.',
+    '',
+    'Committed history:',
+    '- You may read entries.json for context or analytics if helpful. Do not',
+    '  write it unless the user explicitly asks to edit committed history.',
+    '- The app owns committing current_session.json to entries.json when Finish',
+    '  session is pressed.',
   ].join('\n')
 }
 
@@ -1065,6 +1179,10 @@ const S = {
     fontFamily: 'var(--font)', fontSize: '15px', fontWeight: 600,
     cursor: 'pointer', minHeight: '48px',
   },
+  btnPrimaryDisabled: {
+    opacity: 0.52,
+    cursor: 'not-allowed',
+  },
   btnSecondary: {
     padding: '12px 14px', borderRadius: '10px', minHeight: '44px',
     border: '1px solid var(--border)', background: 'var(--surface2, var(--surface))',
@@ -1104,6 +1222,63 @@ const S = {
     fontFamily: 'var(--font)', fontSize: '14px', fontWeight: 800,
     cursor: 'pointer', display: 'inline-flex', alignItems: 'center',
     justifyContent: 'center', lineHeight: 1,
+  }),
+
+  currentSession: {
+    border: '1px solid var(--border)',
+    borderRadius: '8px',
+    background: 'var(--surface)',
+    marginBottom: '14px',
+    overflow: 'hidden',
+  },
+  currentSessionHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '12px',
+    padding: '12px',
+    borderBottom: '1px solid var(--border)',
+  },
+  currentSessionTitle: {
+    margin: 0,
+    fontSize: '14px',
+    lineHeight: 1.25,
+    fontWeight: 800,
+    letterSpacing: 0,
+  },
+  currentSessionSub: {
+    margin: '3px 0 0',
+    color: 'var(--muted)',
+    fontSize: '12px',
+  },
+  currentSessionList: {
+    padding: '8px 10px 2px',
+  },
+  currentSessionEmpty: {
+    padding: '16px 12px',
+    color: 'var(--muted)',
+    fontSize: '13px',
+  },
+  currentSessionMissing: {
+    margin: '0',
+    padding: '0 12px 12px',
+    color: 'var(--muted)',
+    fontSize: '12px',
+    lineHeight: 1.45,
+  },
+  finishBtn: (enabled) => ({
+    padding: '10px 12px',
+    minHeight: '38px',
+    borderRadius: '8px',
+    border: 'none',
+    background: 'var(--accent)',
+    color: '#fff',
+    fontFamily: 'var(--font)',
+    fontSize: '13px',
+    fontWeight: 800,
+    whiteSpace: 'nowrap',
+    opacity: enabled ? 1 : 0.52,
+    cursor: enabled ? 'pointer' : 'not-allowed',
   }),
 
   sessionLabel: {
@@ -1736,6 +1911,68 @@ function EntryCard({ entry, onDelete, onEdit }) {
   )
 }
 
+function SessionDraftCard({ entry }) {
+  const cat = CATEGORIES[entry.category] || CATEGORIES.other
+  return (
+    <div style={{ ...S.entryCard, background: 'color-mix(in srgb, var(--bg) 62%, var(--surface))' }}>
+      <div style={S.entryIcon(cat.color)} aria-hidden>
+        <SportIcon name={entry.icon || cat.icon} color={cat.color} />
+      </div>
+      <div style={S.entryBody}>
+        <div style={S.entryTop}>
+          <h4 style={S.entryName}>{entry.activity}</h4>
+          <span style={S.entryTime}>{cat.label}</span>
+        </div>
+        <p style={S.entryMeta}>{summarizeMetrics(entry) || cat.label}</p>
+      </div>
+    </div>
+  )
+}
+
+function CurrentSessionPanel({ session, onFinish }) {
+  const normalized = useMemo(() => normalizeCurrentSession(session), [session])
+  const entries = normalized?.entries || []
+  const ready = currentSessionReady(normalized)
+  const missing = entries.map(sessionEntryMissing).filter(Boolean)
+  const started = normalized?.startedAt
+    ? new Date(normalized.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : null
+  return (
+    <section style={S.currentSession} aria-label="Current session">
+      <div style={S.currentSessionHead}>
+        <div style={{ minWidth: 0 }}>
+          <h3 style={S.currentSessionTitle}>Current session</h3>
+          <p style={S.currentSessionSub}>
+            {entries.length > 0
+              ? `${entries.length} ${entries.length === 1 ? 'activity' : 'activities'}${started ? ` · started ${started}` : ''}`
+              : 'No active activities yet'}
+          </p>
+        </div>
+        <button
+          type="button"
+          style={S.finishBtn(ready)}
+          disabled={!ready}
+          onClick={onFinish}
+          aria-label="Finish session"
+          title={ready ? 'Finish session' : 'Finish session once required details are complete'}
+        >
+          Finish session
+        </button>
+      </div>
+      {entries.length > 0 ? (
+        <div style={S.currentSessionList}>
+          {entries.map((entry) => <SessionDraftCard key={entry.id} entry={entry} />)}
+        </div>
+      ) : (
+        <div style={S.currentSessionEmpty}>Tell the agent what you did.</div>
+      )}
+      {missing.length > 0 && (
+        <p style={S.currentSessionMissing}>Missing: {missing.join(', ')}.</p>
+      )}
+    </section>
+  )
+}
+
 function LogTab({ entries, onDelete, onEdit }) {
   const groups = useMemo(() => groupEntriesByDate(entries), [entries])
   if (entries.length === 0) {
@@ -1898,6 +2135,64 @@ function categoryStats(entries) {
     .sort((a, b) => b.entries - a.entries)
 }
 
+function exerciseStats(entries) {
+  const sessions = groupSessions(entries)
+  const sessionByEntry = new Map()
+  for (const session of sessions) {
+    for (const entry of session.entries) sessionByEntry.set(entry.id, session.sessionId)
+  }
+  const byActivity = new Map()
+  for (const entry of entries || []) {
+    const key = `${entry.category}:${entry.activity}`
+    if (!byActivity.has(key)) {
+      byActivity.set(key, {
+        activity: entry.activity,
+        category: entry.category,
+        color: CATEGORIES[entry.category]?.color || CATEGORIES.other.color,
+        icon: CATEGORIES[entry.category]?.icon || CATEGORIES.other.icon,
+        entries: 0,
+        sessions: new Set(),
+        lastTs: 0,
+        best: '',
+        bestScore: 0,
+      })
+    }
+    const row = byActivity.get(key)
+    row.entries += 1
+    row.lastTs = Math.max(row.lastTs, Number(entry.ts) || 0)
+    const sid = sessionByEntry.get(entry.id)
+    if (sid) row.sessions.add(sid)
+    const fam = categoryFamily(entry.category)
+    if (fam === 'strength') {
+      for (const set of entry.metrics?.sets || []) {
+        const score = epley1RM(set.weight_kg, set.reps)
+        if (score > row.bestScore) {
+          row.bestScore = score
+          row.best = `${fromKg(set.weight_kg, set.unit)}${set.unit || 'kg'} × ${set.reps}`
+        }
+      }
+    } else if (fam === 'cardio') {
+      const distance = Number(entry.metrics?.distance_m) || 0
+      const duration = Number(entry.metrics?.duration_s) || 0
+      const score = distance || duration
+      if (score > row.bestScore) {
+        row.bestScore = score
+        row.best = [distance ? fmtDistance(distance) : '', duration ? fmtDuration(duration) : ''].filter(Boolean).join(' · ')
+      }
+    } else {
+      const duration = Number(entry.metrics?.duration_s) || 0
+      if (duration > row.bestScore) {
+        row.bestScore = duration
+        row.best = fmtDuration(duration)
+      }
+    }
+  }
+  return [...byActivity.values()]
+    .map((row) => ({ ...row, sessions: row.sessions.size, best: row.best || '—' }))
+    .sort((a, b) => (b.entries - a.entries) || (b.lastTs - a.lastTs))
+    .slice(0, 6)
+}
+
 function CategoryVolumeBars({ weeks }) {
   const totals = new Map()
   for (const week of weeks) {
@@ -1963,6 +2258,7 @@ function CategoryStats({ stats }) {
 function InsightsTab({ entries }) {
   const weeks = useMemo(() => weeklyVolumeByCategory(entries), [entries])
   const stats = useMemo(() => categoryStats(entries), [entries])
+  const exercises = useMemo(() => exerciseStats(entries), [entries])
   const prs = useMemo(() => strengthPRs(entries), [entries])
   const cardio = useMemo(() => cardioBests(entries), [entries])
   const streak = useMemo(() => currentStreak(entries), [entries])
@@ -2000,6 +2296,36 @@ function InsightsTab({ entries }) {
         <p style={S.chartSub}>Sessions and useful totals by activity type.</p>
         <CategoryStats stats={stats} />
       </div>
+
+      {exercises.length > 0 && (
+        <div style={S.chartCard}>
+          <h3 style={S.chartTitle}>Main exercises</h3>
+          <p style={S.chartSub}>Most logged activities with their best stored metric.</p>
+          <table style={S.prTable}>
+            <thead>
+              <tr>
+                <th style={S.prTh}>Exercise</th>
+                <th style={{ ...S.prTh, textAlign: 'right' }}>Best</th>
+                <th style={{ ...S.prTh, textAlign: 'right' }}>Sessions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {exercises.map((row) => (
+                <tr key={`${row.category}:${row.activity}`}>
+                  <td style={S.prTd}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
+                      <SportIcon name={row.icon} color={row.color} size={16} />
+                      {row.activity}
+                    </span>
+                  </td>
+                  <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.best}</td>
+                  <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.sessions}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {prs.length > 0 && (
         <div style={S.chartCard}>
@@ -2110,6 +2436,7 @@ export default function App({ appId, token }) {
   const store = useMemo(() => makeStore(appId, token), [appId, token])
   const [tab, setTab] = useState('log')
   const [entries, setEntries] = useState(null)
+  const [currentSession, setCurrentSession] = useState(null)
   const [bootStatus, setBootStatus] = useState('loading')
   const syncStatus = useSyncStatus(store)
   const saveQueueRef = useRef({ inFlight: false, pending: null })
@@ -2153,15 +2480,28 @@ export default function App({ appId, token }) {
     return []
   }, [bumpSync, store])
 
+  const loadCurrentSession = useCallback(async () => {
+    const loaded = await store.get('current_session.json')
+    const normalized = normalizeCurrentSession(loaded)
+    setCurrentSession(normalized)
+    if (loaded && JSON.stringify(loaded) !== JSON.stringify(normalized)) {
+      store.set('current_session.json', normalized).then((r) => bumpSync(r))
+    }
+    return normalized
+  }, [bumpSync, store])
+
   // Initial load. entries.json is the append-only log. If it's missing but a
   // legacy state.json exists, migrate its logged history to strength entries.
   useEffect(() => {
     let cancelled = false
-    loadEntries({ allowMigration: true, setReady: true }).then(() => {
+    Promise.all([
+      loadEntries({ allowMigration: true, setReady: true }),
+      loadCurrentSession(),
+    ]).then(() => {
       if (cancelled) return
     })
     return () => { cancelled = true }
-  }, [loadEntries])
+  }, [loadCurrentSession, loadEntries])
   const flushSaves = useCallback(async () => {
     const q = saveQueueRef.current
     if (q.inFlight) return
@@ -2222,6 +2562,16 @@ export default function App({ appId, token }) {
   const deleteEntry = useCallback((id) => {
     persist((entries || []).filter((e) => e.id !== id), { deletedIds: [id] })
   }, [entries, persist])
+
+  const finishCurrentSession = useCallback(async () => {
+    const committed = entriesFromCurrentSession(currentSession)
+    if (committed.length === 0) return
+    const nextEntries = mergeEntriesForSave([...(entries || []), ...committed], entries)
+    persist(nextEntries)
+    setCurrentSession(null)
+    const result = await store.set('current_session.json', null)
+    bumpSync(result)
+  }, [bumpSync, currentSession, entries, persist, store])
 
   const resizeChatBy = useCallback((deltaPct) => {
     setChatHeight((value) => Math.min(82, Math.max(44, value + deltaPct)))
@@ -2365,11 +2715,17 @@ export default function App({ appId, token }) {
             ) : (
               <>
                 {tab === 'log' && (
-                  <LogTab
-                    entries={entries}
-                    onDelete={openDeleteConfirm}
-                    onEdit={openEditEntry}
-                  />
+                  <>
+                    <CurrentSessionPanel
+                      session={currentSession}
+                      onFinish={finishCurrentSession}
+                    />
+                    <LogTab
+                      entries={entries}
+                      onDelete={openDeleteConfirm}
+                      onEdit={openEditEntry}
+                    />
+                  </>
                 )}
                 {tab === 'insights' && (
                   <InsightsTab entries={entries} />
@@ -2408,7 +2764,10 @@ export default function App({ appId, token }) {
               token={token}
               store={store}
               height={chatHeight}
-              onEntriesMaybeChanged={() => loadEntries({ allowMigration: false })}
+              onEntriesMaybeChanged={() => {
+                loadEntries({ allowMigration: false })
+                loadCurrentSession()
+              }}
             />
           </>
         )}

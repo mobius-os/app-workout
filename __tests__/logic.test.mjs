@@ -13,7 +13,8 @@ import {
   normalizeEntry, assignSession, currentSession, groupSessions,
   epley1RM, strengthPRs, cardioBests, migrateLegacyState,
   SESSION_GAP_MS, toKg, summarizeMetrics, extractFirstJsonObject, localDate,
-  mergeEntriesForSave, draftsFromParsedPayload,
+  mergeEntriesForSave, draftsFromParsedPayload, normalizeCurrentSession,
+  sessionEntryMissing, currentSessionReady, entriesFromCurrentSession,
 } from '../logic.js'
 import { buildEntry } from '../build-entry.mjs'
 
@@ -213,6 +214,85 @@ test('normalizeEntry: unknown cardio values stay n/a instead of becoming 0', () 
   assert.equal(e.metrics.distance_m, null)
   assert.equal(e.metrics.elevation_m, null)
   assert.equal(summarizeMetrics(e), '')
+})
+
+test('current session keeps incomplete strength drafts out of the finish flow', () => {
+  const session = normalizeCurrentSession({
+    id: 'session-1',
+    startedAt: 1_700_000_000_000,
+    entries: [{
+      id: 'deadlift',
+      ts: 1,
+      category: 'strength',
+      activity: 'Deadlift',
+      metrics: { sets: [{ weight_kg: null, reps: null, unit: 'kg' }, { weight_kg: null, reps: null, unit: 'kg' }] },
+    }],
+  })
+
+  assert.equal(currentSessionReady(session), false)
+  assert.match(sessionEntryMissing(session.entries[0]), /Deadlift reps and weight/)
+  assert.deepEqual(entriesFromCurrentSession(session), [])
+})
+
+test('current session finishes complete mixed activities at the session start time', () => {
+  const startedAt = 1_700_000_000_000
+  const session = {
+    id: 'session-demo',
+    startedAt,
+    entries: [
+      {
+        id: 'deadlift',
+        ts: 20,
+        category: 'strength',
+        activity: 'Deadlift',
+        metrics: { sets: [{ weight_kg: 120, reps: 5, unit: 'kg' }] },
+      },
+      {
+        id: 'swim',
+        ts: 30,
+        category: 'swimming',
+        activity: 'Swim',
+        metrics: { duration_s: 2400, distance_m: null },
+      },
+    ],
+  }
+
+  assert.equal(currentSessionReady(session), true)
+  const entries = entriesFromCurrentSession(session)
+  assert.equal(entries.length, 2)
+  assert.deepEqual(entries.map((entry) => entry.sessionId), ['session-demo', 'session-demo'])
+  assert.deepEqual(entries.map((entry) => entry.ts), [startedAt, startedAt + 1000])
+  assert.equal(entries[0].localDate, localDate(new Date(startedAt)))
+})
+
+test('current session requires duration or distance for cardio drafts', () => {
+  const swim = normalizeCurrentSession({
+    startedAt: 1_700_000_000_000,
+    entries: [{
+      ts: 1,
+      category: 'swimming',
+      activity: 'Swim',
+      metrics: { duration_s: null, distance_m: null },
+    }],
+  })
+
+  assert.equal(currentSessionReady(swim), false)
+  assert.match(sessionEntryMissing(swim.entries[0]), /duration or distance/)
+})
+
+test('current session treats generic strength activity as missing exercise name', () => {
+  const session = normalizeCurrentSession({
+    startedAt: 1_700_000_000_000,
+    entries: [{
+      ts: 1,
+      category: 'strength',
+      metrics: { sets: [{ weight_kg: 20, reps: 5, unit: 'kg' }] },
+    }],
+  })
+
+  assert.equal(session.entries[0].activity, 'Strength')
+  assert.equal(sessionEntryMissing(session.entries[0]), 'activity')
+  assert.equal(currentSessionReady(session), false)
 })
 
 test('normalizeEntry maps a running parse with distance + duration', () => {
