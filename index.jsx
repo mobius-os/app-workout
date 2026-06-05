@@ -73,8 +73,9 @@ function fromKg(kg, unit) {
 
 // distance → metres. Accepts m, km, mi.
 function toMetres(value, unit) {
+  if (value === '' || value == null) return null
   const v = Number(value)
-  if (!isFinite(v)) return 0
+  if (!isFinite(v)) return null
   if (unit === 'km') return Math.round(v * 1000)
   if (unit === 'mi') return Math.round(v * 1609.344)
   return Math.round(v)
@@ -82,8 +83,9 @@ function toMetres(value, unit) {
 
 // duration → seconds. Accepts s, min, h.
 function toSeconds(value, unit) {
+  if (value === '' || value == null) return null
   const v = Number(value)
-  if (!isFinite(v)) return 0
+  if (!isFinite(v)) return null
   if (unit === 'min') return Math.round(v * 60)
   if (unit === 'h') return Math.round(v * 3600)
   return Math.round(v)
@@ -193,13 +195,17 @@ function normalizeEntry(parsed, opts = {}) {
   let metrics
   if (family === 'strength') {
     metrics = {
-      sets: (Array.isArray(m.sets) ? m.sets : []).map((s) => ({
-        // Store SI (kg). reps is dimensionless. We keep the user's display
-        // unit on the set so the card can echo "100kg" vs "225lb" back.
-        weight_kg: Math.max(0, toKg(s.weight, s.unit || 'kg')),
-        reps: Math.max(0, Math.round(Number(s.reps) || 0)),
-        unit: s.unit === 'lb' ? 'lb' : 'kg',
-      })),
+      sets: (Array.isArray(m.sets) ? m.sets : []).map((s) => {
+        const rawWeight = finiteMetricNumber(s.weight)
+        const rawReps = finiteMetricNumber(s.reps)
+        return {
+          // Store SI (kg). reps is dimensionless. We keep the user's display
+          // unit on the set so the card can echo "100kg" vs "225lb" back.
+          weight_kg: rawWeight == null ? null : Math.max(0, toKg(rawWeight, s.unit || 'kg')),
+          reps: rawReps == null ? null : Math.max(0, Math.round(rawReps)),
+          unit: s.unit === 'lb' ? 'lb' : 'kg',
+        }
+      }),
     }
   } else if (family === 'cardio') {
     metrics = {
@@ -238,8 +244,15 @@ function textOrNull(value) {
 }
 
 function numberOrNull(value) {
+  if (value === '' || value == null) return null
   const n = Number(value)
   return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+function finiteMetricNumber(value) {
+  if (value === '' || value == null) return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
 }
 
 function normalizeStoredEntry(entry) {
@@ -254,12 +267,20 @@ function normalizeStoredEntry(entry) {
   if (family === 'strength') {
     metrics = {
       sets: (Array.isArray(sourceMetrics.sets) ? sourceMetrics.sets : [])
-        .map((s) => ({
-          weight_kg: numberOrNull(s?.weight_kg ?? toKg(s?.weight, s?.unit || 'kg')) ?? 0,
-          reps: Math.max(0, Math.round(Number(s?.reps) || 0)),
-          unit: s?.unit === 'lb' ? 'lb' : 'kg',
-        }))
-        .filter((s) => s.weight_kg > 0 || s.reps > 0),
+        .map((s) => {
+          const sourceWeight = s?.weight_kg ?? (
+            numberOrNull(s?.weight) == null ? null : toKg(s?.weight, s?.unit || 'kg')
+          )
+          const weight_kg = numberOrNull(sourceWeight)
+          const reps = numberOrNull(s?.reps) == null ? null : Math.max(0, Math.round(Number(s.reps)))
+          if (Number(sourceWeight) < 0 && (!reps || reps <= 0)) return null
+          return {
+            weight_kg,
+            reps,
+            unit: s?.unit === 'lb' ? 'lb' : 'kg',
+          }
+        })
+        .filter(Boolean)
     }
   } else if (family === 'cardio') {
     metrics = {
@@ -606,13 +627,16 @@ function summarizeStrengthSets(sets) {
   const groups = new Map()
   for (const s of rows) {
     const unit = s.unit === 'lb' ? 'lb' : 'kg'
-    const weight = fromKg(s.weight_kg, unit)
-    const reps = Math.max(0, Math.round(Number(s.reps) || 0))
-    const key = `${reps}|${weight}|${unit}`
+    const weight = numberOrNull(s.weight_kg) == null ? null : fromKg(s.weight_kg, unit)
+    const reps = numberOrNull(s.reps) == null ? null : Math.max(0, Math.round(Number(s.reps)))
+    const key = `${reps ?? 'n/a'}|${weight ?? 'n/a'}|${unit}`
     groups.set(key, (groups.get(key) || 0) + 1)
   }
   return [...groups.entries()].map(([key, count]) => {
     const [reps, weight, unit] = key.split('|')
+    if (reps === 'n/a' && weight === 'n/a') return count === 1 ? '1 set' : `${count} sets`
+    if (reps === 'n/a') return count === 1 ? `1 set @ ${weight}${unit}` : `${count} sets @ ${weight}${unit}`
+    if (weight === 'n/a') return `${count}×${reps}`
     return `${count}×${reps} @ ${weight}${unit}`
   }).join(' · ')
 }
@@ -859,10 +883,10 @@ strength, cardio, running, cycling, swimming, rowing, hiking, yoga, sport, other
 - sport: football, basketball, tennis, climbing, martial arts, a match or game.
 - other: anything that doesn't fit (a walk, gardening, a long event like a triathlon if mixed — choose the dominant leg or 'other').
 
-Metrics shape depends on the category family:
-- strength → {"sets": [{"weight": number, "reps": number, "unit": "kg"|"lb"}]}. One object per set. If the user logs multiple identical sets ("3 sets of 5 at 100kg"), expand to 3 set objects.
+Metrics shape depends on the category family. Use null for unknown numeric fields; never invent 0 as a placeholder for an unknown value.
+- strength → {"sets": [{"weight": number|null, "reps": number|null, "unit": "kg"|"lb"}]}. One object per set. If the user logs multiple identical sets ("3 sets of 5 at 100kg"), expand to 3 set objects. If they only say "three sets of deadlifts", return three set objects with null weight and null reps.
 - cardio family (cardio/running/cycling/swimming/rowing/hiking) → {"duration": {"value": number, "unit": "s"|"min"|"h"}, "distance": {"value": number, "unit": "m"|"km"|"mi"}, "elevation": {"value": number, "unit": "m"|"km"}, "location": "string"}. Include only the fields the user mentioned.
-- other → {"duration": {"value": number, "unit": "s"|"min"|"h"}, "location": "string", "note": "string"}.
+- yoga, sport, other → {"duration": {"value": number, "unit": "s"|"min"|"h"}, "location": "string", "note": "string"}.
 
 If the user describes multiple activities in one message, return one entry per activity in chronological order. Do not collapse "deadlift, climbing, bench" into one entry. Preserve clear entries even when a later entry needs clarification.
 
@@ -896,6 +920,29 @@ function buildUserMessage(text, ctx) {
     return `- ${e.activity} [${e.category}]: ${summary}`
   }).join('\n')
   return `Local date: ${localDate()}\n\nCurrent open session (most recent last):\n${recent}\n\nEntry: ${text}`
+}
+
+function buildClarificationUserMessage(text, target) {
+  const entry = target?.entry
+  const current = entry
+    ? JSON.stringify({
+        category: entry.category,
+        activity: entry.activity,
+        metrics: entry.metrics,
+      }, null, 2)
+    : '{}'
+  return `Local date: ${localDate()}
+
+Update this existing logged entry using the user's answer. Keep fields that the answer does not change. Return exactly one entry in the usual JSON shape.
+
+Existing stored entry:
+${current}
+
+Clarification question:
+${target?.question || ''}
+
+User answer:
+${text}`
 }
 
 // ---------------------------------------------------------------------------
@@ -985,6 +1032,27 @@ const S = {
     fontSize: '11px', color: 'var(--muted)', textAlign: 'center',
     margin: '8px 0 0',
   },
+  chatPanel: {
+    display: 'flex', flexDirection: 'column', gap: '8px',
+    marginBottom: '16px',
+  },
+  chatRow: (role) => ({
+    display: 'flex', justifyContent: role === 'user' ? 'flex-end' : 'flex-start',
+  }),
+  chatBubble: (role) => ({
+    maxWidth: '86%', borderRadius: '8px', padding: '10px 12px',
+    fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap',
+    background: role === 'user'
+      ? 'color-mix(in srgb, var(--accent) 22%, var(--surface))'
+      : 'var(--surface)',
+    border: '1px solid var(--border)',
+    color: 'var(--text)',
+  }),
+  chatMeta: {
+    display: 'block', marginBottom: '3px',
+    fontSize: '10px', color: 'var(--muted)', fontWeight: 800,
+    textTransform: 'uppercase', letterSpacing: '0.4px',
+  },
 
   card: {
     background: 'var(--surface)', border: '1px solid var(--border)',
@@ -1031,6 +1099,7 @@ const S = {
   entryTime: { fontSize: '11px', color: 'var(--muted)', whiteSpace: 'nowrap' },
   entryMeta: { fontSize: '13px', color: 'var(--text)', margin: '5px 0 0', fontVariantNumeric: 'tabular-nums' },
   entryRaw: { fontSize: '11px', color: 'var(--muted)', margin: '6px 0 0', fontStyle: 'italic' },
+  entryActions: { display: 'flex', flexDirection: 'column', gap: '4px', flexShrink: 0 },
 
   sessionLabel: {
     display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '12px',
@@ -1262,16 +1331,30 @@ function ConfirmModal({ title, body, confirmLabel, onConfirm, onCancel }) {
 
 function ConfirmCard({
   draft, ambiguous, clarification, onCommit, onCancel, position = 1, total = 1,
+  initialTs = Date.now(), title = null, commitLabel = null,
 }) {
   const [category, setCategory] = useState(draft.category)
   const [activity, setActivity] = useState(draft.activity)
   const fam = categoryFamily(category)
+  const initialDate = new Date(initialTs)
+  const [dateValue, setDateValue] = useState(() => localDate(initialDate))
+  const [timeValue, setTimeValue] = useState(() => {
+    const h = String(initialDate.getHours()).padStart(2, '0')
+    const m = String(initialDate.getMinutes()).padStart(2, '0')
+    return `${h}:${m}`
+  })
 
   // Strength sets — editable rows of {weight, reps, unit}, in DISPLAY units.
   const [sets, setSets] = useState(() => {
     const s = draft.metrics?.sets
-    if (Array.isArray(s) && s.length > 0) return s.map((x) => ({ ...x }))
-    return [{ weight: 0, reps: 0, unit: 'kg' }]
+    if (Array.isArray(s) && s.length > 0) {
+      return s.map((x) => ({
+        weight: x.weight ?? '',
+        reps: x.reps ?? '',
+        unit: x.unit === 'lb' ? 'lb' : 'kg',
+      }))
+    }
+    return [{ weight: '', reps: '', unit: 'kg' }]
   })
   // Cardio/other — display-unit metric fields.
   const [duration, setDuration] = useState(draft.metrics?.duration?.value ?? '')
@@ -1285,35 +1368,44 @@ function ConfirmCard({
   const updateSet = (i, patch) =>
     setSets((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)))
   const addSet = () =>
-    setSets((prev) => [...prev, { ...(prev[prev.length - 1] || { weight: 0, reps: 0, unit: 'kg' }) }])
+    setSets((prev) => [...prev, { ...(prev[prev.length - 1] || { weight: '', reps: '', unit: 'kg' }) }])
   const removeSet = (i) =>
     setSets((prev) => (prev.length <= 1 ? prev : prev.filter((_, j) => j !== i)))
+  const metricNumber = (value) => {
+    if (value === '' || value == null) return null
+    const n = Number(value)
+    return Number.isFinite(n) ? n : null
+  }
 
   const handleCommit = () => {
     // Reassemble a "parsed" object in the LLM's loose shape, then hand it to
     // normalizeEntry so storage is always SI regardless of what was typed.
     let metrics
     if (fam === 'strength') {
-      metrics = { sets: sets.map((s) => ({ weight: Number(s.weight) || 0, reps: Number(s.reps) || 0, unit: s.unit })) }
+      metrics = { sets: sets.map((s) => ({ weight: metricNumber(s.weight), reps: metricNumber(s.reps), unit: s.unit })) }
     } else if (fam === 'cardio') {
       metrics = {}
-      if (duration !== '') metrics.duration = { value: Number(duration), unit: durationUnit }
-      if (distance !== '') metrics.distance = { value: Number(distance), unit: distanceUnit }
-      if (elevation !== '') metrics.elevation = { value: Number(elevation), unit: 'm' }
+      if (duration !== '') metrics.duration = { value: metricNumber(duration), unit: durationUnit }
+      if (distance !== '') metrics.distance = { value: metricNumber(distance), unit: distanceUnit }
+      if (elevation !== '') metrics.elevation = { value: metricNumber(elevation), unit: 'm' }
       if (location) metrics.location = location
     } else {
       metrics = {}
-      if (duration !== '') metrics.duration = { value: Number(duration), unit: durationUnit }
+      if (duration !== '') metrics.duration = { value: metricNumber(duration), unit: durationUnit }
       if (location) metrics.location = location
       if (note) metrics.note = note
     }
-    onCommit({ category, activity: activity.trim() || CATEGORIES[category].label, metrics })
+    const nextTs = new Date(`${dateValue || localDate()}T${timeValue || '12:00'}`).getTime()
+    onCommit(
+      { category, activity: activity.trim() || CATEGORIES[category].label, metrics },
+      Number.isFinite(nextTs) ? nextTs : Date.now(),
+    )
   }
 
   return (
     <div style={{ ...S.card, borderColor: ambiguous ? 'var(--accent)' : 'var(--border)' }}>
       <h3 style={S.cardTitle}>
-        {ambiguous ? 'Check this one' : 'Confirm entry'}
+        {title || (ambiguous ? 'Check this one' : 'Edit entry')}
         {total > 1 ? ` · ${position}/${total}` : ''}
       </h3>
       {ambiguous && clarification ? (
@@ -1332,6 +1424,26 @@ function ConfirmCard({
         onChange={(e) => setActivity(e.target.value)}
         aria-label="Activity name" placeholder="e.g. Deadlift, Trail run"
       />
+
+      <div style={{ height: '12px' }} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <div>
+          <label style={S.label}>Date</label>
+          <input
+            style={S.textInput} type="date" value={dateValue}
+            onChange={(e) => setDateValue(e.target.value)}
+            aria-label="Entry date"
+          />
+        </div>
+        <div>
+          <label style={S.label}>Time</label>
+          <input
+            style={S.textInput} type="time" value={timeValue}
+            onChange={(e) => setTimeValue(e.target.value)}
+            aria-label="Entry time"
+          />
+        </div>
+      </div>
 
       <div style={{ height: '12px' }} />
       <label style={S.label}>Category</label>
@@ -1358,12 +1470,12 @@ function ConfirmCard({
               <input
                 style={S.textInput} type="number" inputMode="decimal" value={s.weight}
                 onChange={(e) => updateSet(i, { weight: e.target.value })}
-                aria-label={`Set ${i + 1} weight`} placeholder="weight"
+                aria-label={`Set ${i + 1} weight`} placeholder="n/a"
               />
               <input
                 style={S.textInput} type="number" inputMode="numeric" value={s.reps}
                 onChange={(e) => updateSet(i, { reps: e.target.value })}
-                aria-label={`Set ${i + 1} reps`} placeholder="reps"
+                aria-label={`Set ${i + 1} reps`} placeholder="n/a"
               />
               <button
                 style={{ ...S.btnGhost, color: 'var(--muted)', minWidth: '44px' }}
@@ -1390,7 +1502,7 @@ function ConfirmCard({
               <label style={S.label}>Duration</label>
               <input
                 style={S.textInput} type="number" inputMode="decimal" value={duration}
-                onChange={(e) => setDuration(e.target.value)} aria-label="Duration" placeholder="0"
+                onChange={(e) => setDuration(e.target.value)} aria-label="Duration" placeholder="n/a"
               />
             </div>
             <select value={durationUnit} onChange={(e) => setDurationUnit(e.target.value)}
@@ -1408,7 +1520,7 @@ function ConfirmCard({
                   <label style={S.label}>Distance</label>
                   <input
                     style={S.textInput} type="number" inputMode="decimal" value={distance}
-                    onChange={(e) => setDistance(e.target.value)} aria-label="Distance" placeholder="0"
+                    onChange={(e) => setDistance(e.target.value)} aria-label="Distance" placeholder="n/a"
                   />
                 </div>
                 <select value={distanceUnit} onChange={(e) => setDistanceUnit(e.target.value)}
@@ -1422,7 +1534,7 @@ function ConfirmCard({
               <label style={S.label}>Elevation gain (m)</label>
               <input
                 style={S.textInput} type="number" inputMode="decimal" value={elevation}
-                onChange={(e) => setElevation(e.target.value)} aria-label="Elevation gain in metres" placeholder="0"
+                onChange={(e) => setElevation(e.target.value)} aria-label="Elevation gain in metres" placeholder="n/a"
               />
             </>
           )}
@@ -1447,7 +1559,7 @@ function ConfirmCard({
 
       <div style={{ height: '16px' }} />
       <button style={S.btnPrimary} onClick={handleCommit} aria-label="Save entry">
-        {total > 1 && position < total ? 'Save and review next' : 'Save to log'}
+        {commitLabel || (total > 1 && position < total ? 'Save and review next' : 'Save to log')}
       </button>
       <div style={{ height: '10px' }} />
       <button style={{ ...S.btnSecondary, width: '100%' }} onClick={onCancel} aria-label="Discard entry">Discard</button>
@@ -1515,7 +1627,92 @@ function Composer({ value, onChange, onSend, busy, online, error, onDismissError
 // Entry feed — entries grouped into derived sessions, newest first.
 // ---------------------------------------------------------------------------
 
-function EntryCard({ entry, onDelete }) {
+function secondsToDisplay(seconds) {
+  const s = Number(seconds)
+  if (!Number.isFinite(s) || s <= 0) return { value: '', unit: 'min' }
+  if (s % 3600 === 0) return { value: s / 3600, unit: 'h' }
+  if (s % 60 === 0) return { value: s / 60, unit: 'min' }
+  return { value: s, unit: 's' }
+}
+
+function metresToDisplay(metres) {
+  const m = Number(metres)
+  if (!Number.isFinite(m) || m <= 0) return { value: '', unit: 'km' }
+  if (m >= 1000 && m % 1000 === 0) return { value: m / 1000, unit: 'km' }
+  return { value: m, unit: 'm' }
+}
+
+function draftFromStoredEntry(entry) {
+  const category = CATEGORIES[entry.category] ? entry.category : 'other'
+  const fam = categoryFamily(category)
+  let metrics
+  if (fam === 'strength') {
+    metrics = {
+      sets: (entry.metrics?.sets || []).map((set) => {
+        const unit = set.unit === 'lb' ? 'lb' : 'kg'
+        return {
+          weight: set.weight_kg == null ? '' : fromKg(set.weight_kg, unit),
+          reps: set.reps ?? '',
+          unit,
+        }
+      }),
+    }
+  } else if (fam === 'cardio') {
+    const duration = secondsToDisplay(entry.metrics?.duration_s)
+    const distance = metresToDisplay(entry.metrics?.distance_m)
+    metrics = {
+      duration,
+      distance,
+      elevation: entry.metrics?.elevation_m == null ? undefined : { value: entry.metrics.elevation_m, unit: 'm' },
+      location: entry.metrics?.location || '',
+    }
+  } else {
+    const duration = secondsToDisplay(entry.metrics?.duration_s)
+    metrics = {
+      duration,
+      location: entry.metrics?.location || '',
+      note: entry.metrics?.note || '',
+    }
+  }
+  return { category, activity: entry.activity || CATEGORIES[category].label, metrics }
+}
+
+function groupEntriesByDate(entries) {
+  const byDate = new Map()
+  for (const entry of [...(entries || [])].sort((a, b) => b.ts - a.ts)) {
+    const key = entry.localDate || localDate(new Date(entry.ts))
+    if (!byDate.has(key)) byDate.set(key, [])
+    byDate.get(key).push(entry)
+  }
+  return [...byDate.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([date, rows]) => ({ date, entries: rows }))
+}
+
+function ChatPanel({ messages, parsing }) {
+  return (
+    <div style={S.chatPanel} aria-live="polite">
+      {messages.map((message) => (
+        <div key={message.id} style={S.chatRow(message.role)}>
+          <div style={S.chatBubble(message.role)}>
+            <span style={S.chatMeta}>{message.role === 'user' ? 'You' : 'Agent'}</span>
+            {message.text}
+          </div>
+        </div>
+      ))}
+      {parsing && (
+        <div style={S.chatRow('assistant')}>
+          <div style={S.chatBubble('assistant')}>
+            <span style={S.chatMeta}>Agent</span>
+            Reading that…
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EntryCard({ entry, onDelete, onEdit }) {
   const cat = CATEGORIES[entry.category] || CATEGORIES.other
   const time = new Date(entry.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   return (
@@ -1530,16 +1727,22 @@ function EntryCard({ entry, onDelete }) {
         </div>
         <p style={S.entryMeta}>{summarizeMetrics(entry) || cat.label}</p>
       </div>
-      <button
-        style={{ ...S.btnGhost, color: 'var(--muted)', padding: '4px 8px', minHeight: '44px' }}
-        onClick={() => onDelete(entry.id)} aria-label={`Delete ${entry.activity}`}
-      >×</button>
+      <div style={S.entryActions}>
+        <button
+          style={{ ...S.btnGhost, color: 'var(--accent)', padding: '4px 8px', minHeight: '36px' }}
+          onClick={() => onEdit(entry)} aria-label={`Edit ${entry.activity}`}
+        >Edit</button>
+        <button
+          style={{ ...S.btnGhost, color: 'var(--muted)', padding: '4px 8px', minHeight: '36px' }}
+          onClick={() => onDelete(entry.id)} aria-label={`Delete ${entry.activity}`}
+        >×</button>
+      </div>
     </div>
   )
 }
 
-function LogTab({ entries, onDelete }) {
-  const sessions = useMemo(() => groupSessions(entries).reverse(), [entries])
+function LogTab({ entries, onDelete, onEdit }) {
+  const groups = useMemo(() => groupEntriesByDate(entries), [entries])
   if (entries.length === 0) {
     return (
       <div style={S.empty}>
@@ -1554,19 +1757,18 @@ function LogTab({ entries, onDelete }) {
   const todayIso = localDate()
   return (
     <div>
-      {sessions.map((sess) => {
-        const entriesNewestFirst = [...sess.entries].sort((a, b) => b.ts - a.ts)
-        const dateLabel = sess.localDate === todayIso
+      {groups.map((group) => {
+        const dateLabel = group.date === todayIso
           ? 'Today'
-          : new Date(`${sess.localDate}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+          : new Date(`${group.date}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
         return (
-          <div key={sess.sessionId}>
+          <div key={group.date}>
             <div style={S.sessionLabel}>
               <span style={S.sessionDate}>{dateLabel}</span>
-              <span style={S.sessionSpan}>{fmtSessionRange(sess)}</span>
+              <span style={S.sessionSpan}>{group.entries.length} entr{group.entries.length === 1 ? 'y' : 'ies'}</span>
             </div>
-            {entriesNewestFirst.map((e) => (
-              <EntryCard key={e.id} entry={e} onDelete={onDelete} />
+            {group.entries.map((e) => (
+              <EntryCard key={e.id} entry={e} onDelete={onDelete} onEdit={onEdit} />
             ))}
           </div>
         )
@@ -1870,8 +2072,8 @@ function InsightsTab({ entries }) {
 // All tab — flat, newest-first list of every entry with delete.
 // ---------------------------------------------------------------------------
 
-function AllTab({ entries, onDelete }) {
-  const sessions = useMemo(() => groupSessions(entries).reverse(), [entries])
+function AllTab({ entries, onDelete, onEdit }) {
+  const groups = useMemo(() => groupEntriesByDate(entries), [entries])
   if (entries.length === 0) {
     return (
       <div style={S.empty}>
@@ -1886,18 +2088,18 @@ function AllTab({ entries, onDelete }) {
   return (
     <div>
       <p style={S.cardSub}>{entries.length} total {entries.length === 1 ? 'entry' : 'entries'}.</p>
-      {sessions.map((sess) => {
-        const dateLabel = sess.localDate === todayIso
+      {groups.map((group) => {
+        const dateLabel = group.date === todayIso
           ? 'Today'
-          : new Date(`${sess.localDate}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+          : new Date(`${group.date}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
         return (
-          <div key={sess.sessionId}>
+          <div key={group.date}>
             <div style={S.sessionLabel}>
               <span style={S.sessionDate}>{dateLabel}</span>
-              <span style={S.sessionSpan}>{fmtSessionRange(sess)}</span>
+              <span style={S.sessionSpan}>{group.entries.length} entr{group.entries.length === 1 ? 'y' : 'ies'}</span>
             </div>
-            {[...sess.entries].sort((a, b) => b.ts - a.ts).map((e) => (
-              <EntryCard key={e.id} entry={e} onDelete={onDelete} />
+            {group.entries.map((e) => (
+              <EntryCard key={e.id} entry={e} onDelete={onDelete} onEdit={onEdit} />
             ))}
           </div>
         )
@@ -1924,8 +2126,15 @@ export default function App({ appId, token }) {
   const [parsing, setParsing] = useState(false)
   const [parseError, setParseError] = useState('')
   const [successFlash, setSuccessFlash] = useState('')
-  const [pendingDrafts, setPendingDrafts] = useState([]) // [{ draft, ambiguous, clarification, raw, source }]
+  const [chatMessages, setChatMessages] = useState(() => [{
+    id: uid(),
+    role: 'assistant',
+    text: 'Tell me what you did and I will keep the log updated.',
+  }])
+  const [editingEntry, setEditingEntry] = useState(null)
+  const [clarificationTarget, setClarificationTarget] = useState(null)
   const [deletePending, setDeletePending] = useState(null) // entry id awaiting confirm
+  const navHandleRef = useRef(null)
 
   // Initial load. entries.json is the append-only log. If it's missing but a
   // legacy state.json exists, migrate its logged history to strength entries.
@@ -2006,50 +2215,90 @@ export default function App({ appId, token }) {
     flushSaves()
   }, [flushSaves])
 
-  const pendingDraft = pendingDrafts[0] || null
+  const appendChat = useCallback((role, text) => {
+    setChatMessages((prev) => [...prev, { id: uid(), role, text }])
+  }, [])
 
-  // Commit a confirmed draft as a normalized, SI-stored entry. Session is
-  // assigned against the existing entries so the 4h-gap rule clusters it.
-  const commitDraft = useCallback((edited) => {
-    const activeDraft = pendingDrafts[0]
-    const ts = Date.now()
-    const sessionId = assignSession(entries || [], ts)
+  const describeLoggedEntries = (logged, questions = []) => {
+    const names = logged.map((entry) => `${entry.activity}${summarizeMetrics(entry) ? ` (${summarizeMetrics(entry)})` : ''}`)
+    const loggedLine = names.length > 0
+      ? `Logged ${names.join(', ')}.`
+      : 'I could not confidently add anything yet.'
+    if (questions.length === 0) return loggedLine
+    return `${loggedLine}\n\n${questions[0]}`
+  }
+
+  const entriesFromDrafts = useCallback((drafts, raw, baseEntries = entries || []) => {
+    const baseTs = Date.now()
+    const next = []
+    for (const [index, item] of drafts.entries()) {
+      const ts = baseTs + index * 1000
+      const sessionId = assignSession([...baseEntries, ...next], ts)
+      next.push(normalizeEntry(item.draft, {
+        ts,
+        sessionId,
+        raw,
+        source: item.source || 'ai',
+        confirmed: !item.ambiguous,
+      }))
+    }
+    return next
+  }, [entries])
+
+  const commitEditedEntry = useCallback((edited, ts) => {
+    if (!editingEntry) return
+    const sessionId = editingEntry.sessionId || assignSession(
+      (entries || []).filter((entry) => entry.id !== editingEntry.id),
+      ts,
+    )
     const entry = normalizeEntry(edited, {
-      ts, sessionId,
-      raw: activeDraft?.raw || '',
-      source: activeDraft?.source || 'ai',
+      id: editingEntry.id,
+      ts,
+      sessionId,
+      raw: editingEntry.raw || '',
+      source: editingEntry.source || 'manual',
       confirmed: true,
     })
-    persist([...(entries || []), entry])
-    setPendingDrafts((prev) => prev.slice(1))
+    persist((entries || []).map((row) => (row.id === editingEntry.id ? entry : row)))
+    setEditingEntry(null)
     setTab('log')
-    setSuccessFlash(pendingDrafts.length > 1 ? 'Logged — review the next part.' : 'Logged.')
+    appendChat('assistant', `Updated ${entry.activity}.`)
+    setSuccessFlash('Updated.')
     if (successTimerRef.current) clearTimeout(successTimerRef.current)
     successTimerRef.current = setTimeout(() => {
       setSuccessFlash('')
       successTimerRef.current = null
     }, 1400)
-  }, [entries, pendingDrafts, persist])
+  }, [appendChat, editingEntry, entries, persist])
 
   const deleteEntry = useCallback((id) => {
     persist((entries || []).filter((e) => e.id !== id), { deletedIds: [id] })
   }, [entries, persist])
 
-  // Send the composer text to /api/ai, parse the JSON, open the confirm card.
+  // Send chat text to /api/ai, parse JSON, and let the agent update the log.
   const handleSend = useCallback(async () => {
     const text = input.trim()
     if (!text) return
     setParseError('')
     setSuccessFlash('')
+    appendChat('user', text)
 
-    // Offline → skip the model, open a blank confirm card (manual fallback).
+    // Offline → create a best-effort note entry and leave it editable.
     if (!navigator.onLine) {
-      setPendingDrafts([{
-        draft: { category: 'other', activity: '', metrics: {} },
-        ambiguous: true,
-        clarification: 'Offline — fill this in manually.',
-        raw: text, source: 'manual',
-      }])
+      const ts = Date.now()
+      const entry = normalizeEntry({
+        category: 'other',
+        activity: 'Activity',
+        metrics: { note: text },
+      }, {
+        ts,
+        sessionId: assignSession(entries || [], ts),
+        raw: text,
+        source: 'manual',
+        confirmed: false,
+      })
+      persist([...(entries || []), entry])
+      appendChat('assistant', `I saved that as an editable note for now: ${entry.activity}.`)
       setInput('')
       return
     }
@@ -2057,9 +2306,20 @@ export default function App({ appId, token }) {
     setParsing(true)
     const ctx = currentSession(entries || [])
     try {
+      const activeClarification = clarificationTarget
+        ? {
+            ...clarificationTarget,
+            entry: (entries || []).find((entry) => entry.id === clarificationTarget.entryId),
+          }
+        : null
       let full = ''
       for await (const ev of streamAi(
-        [{ role: 'user', content: buildUserMessage(text, ctx) }],
+        [{
+          role: 'user',
+          content: activeClarification
+            ? buildClarificationUserMessage(text, activeClarification)
+            : buildUserMessage(text, ctx),
+        }],
         AI_SYSTEM, token,
       )) {
         if (ev.type === 'text') full += ev.content
@@ -2073,18 +2333,87 @@ export default function App({ appId, token }) {
         source: 'ai',
       }))
       if (drafts.length === 0) throw new Error('empty-drafts')
-      setPendingDrafts(drafts)
+      if (activeClarification?.entry) {
+        const revised = normalizeEntry(drafts[0].draft, {
+          id: activeClarification.entry.id,
+          ts: activeClarification.entry.ts,
+          sessionId: activeClarification.entry.sessionId,
+          raw: activeClarification.entry.raw || text,
+          source: activeClarification.entry.source || 'ai',
+          confirmed: !drafts[0].ambiguous,
+        })
+        persist((entries || []).map((entry) => (entry.id === revised.id ? revised : entry)))
+        setClarificationTarget(null)
+        appendChat('assistant', describeLoggedEntries([revised], drafts[0].ambiguous && drafts[0].clarification ? [drafts[0].clarification] : []))
+        if (drafts[0].ambiguous && drafts[0].clarification) {
+          setClarificationTarget({ entryId: revised.id, question: drafts[0].clarification })
+        }
+      } else {
+        const logged = entriesFromDrafts(drafts, text)
+        persist([...(entries || []), ...logged])
+        const questions = drafts
+          .map((draft, index) => (draft.ambiguous && draft.clarification ? { index, text: draft.clarification } : null))
+          .filter(Boolean)
+        appendChat('assistant', describeLoggedEntries(logged, questions.map((q) => q.text)))
+        if (questions.length > 0 && logged[questions[0].index]) {
+          setClarificationTarget({ entryId: logged[questions[0].index].id, question: questions[0].text })
+        }
+      }
       setInput('')
     } catch {
+      appendChat('assistant', 'I could not parse that cleanly. Try saying it another way, or add the entry and edit it from the log.')
       setParseError('I could not parse that. Your text is still here; edit it or try again.')
     } finally {
       setParsing(false)
     }
-  }, [input, entries, token])
+  }, [appendChat, clarificationTarget, entries, entriesFromDrafts, input, persist, token])
 
   useEffect(() => () => {
     if (successTimerRef.current) clearTimeout(successTimerRef.current)
   }, [])
+
+  const closeNestedNav = useCallback(() => {
+    try { navHandleRef.current?.close?.() } catch {}
+    navHandleRef.current = null
+  }, [])
+
+  const openEditEntry = useCallback(async (entry, nextTab = null) => {
+    if (!entry) return
+    closeNestedNav()
+    if (window.mobius?.nav?.open) {
+      const handle = window.mobius.nav.open('workout-edit', () => {
+        navHandleRef.current = null
+        setEditingEntry(null)
+      })
+      navHandleRef.current = handle
+      await handle.ready?.catch(() => false)
+      if (navHandleRef.current !== handle) return
+    }
+    if (nextTab) setTab(nextTab)
+    setEditingEntry(entry)
+  }, [closeNestedNav])
+
+  const openDeleteConfirm = useCallback(async (id) => {
+    if (!id) return
+    closeNestedNav()
+    if (window.mobius?.nav?.open) {
+      const handle = window.mobius.nav.open('workout-delete', () => {
+        navHandleRef.current = null
+        setDeletePending(null)
+      })
+      navHandleRef.current = handle
+      await handle.ready?.catch(() => false)
+      if (navHandleRef.current !== handle) return
+    }
+    setDeletePending(id)
+  }, [closeNestedNav])
+
+  useEffect(() => {
+    if (editingEntry || deletePending) return
+    closeNestedNav()
+  }, [editingEntry, deletePending, closeNestedNav])
+
+  useEffect(() => () => closeNestedNav(), [closeNestedNav])
 
   if (bootStatus === 'loading') {
     return <div style={S.root}><div style={S.loading}>Loading…</div></div>
@@ -2106,40 +2435,48 @@ export default function App({ appId, token }) {
 
       <div style={S.scroll}>
         <div style={S.inner}>
-          {pendingDraft ? (
+          {tab === 'log' && (
+            <ChatPanel messages={chatMessages} parsing={parsing} />
+          )}
+          {editingEntry ? (
             <ConfirmCard
-              draft={pendingDraft.draft}
-              ambiguous={pendingDraft.ambiguous}
-              clarification={pendingDraft.clarification}
-              position={1}
-              total={pendingDrafts.length}
-              onCommit={commitDraft}
+              draft={draftFromStoredEntry(editingEntry)}
+              ambiguous={!editingEntry.confirmed}
+              clarification={!editingEntry.confirmed ? 'Some fields may still be n/a.' : ''}
+              initialTs={editingEntry.ts}
+              title="Edit log entry"
+              commitLabel="Save changes"
+              onCommit={commitEditedEntry}
               onCancel={() => {
-                // Restore what the user typed — a successful parse clears the
-                // composer, so a bare setPendingDraft(null) would lose the
-                // original text and force them to retype it to edit/retry.
-                if (pendingDraft?.raw) setInput(pendingDraft.raw)
-                setPendingDrafts([])
+                closeNestedNav()
+                setEditingEntry(null)
               }}
             />
           ) : (
             <>
               {tab === 'log' && (
-                <LogTab entries={entries} onDelete={(id) => setDeletePending(id)} />
+                <LogTab
+                  entries={entries}
+                  onDelete={openDeleteConfirm}
+                  onEdit={openEditEntry}
+                />
               )}
               {tab === 'insights' && (
                 <InsightsTab entries={entries} />
               )}
               {tab === 'all' && (
-                <AllTab entries={entries} onDelete={(id) => setDeletePending(id)} />
+                <AllTab
+                  entries={entries}
+                  onDelete={openDeleteConfirm}
+                  onEdit={(entry) => openEditEntry(entry, 'log')}
+                />
               )}
             </>
           )}
         </div>
       </div>
 
-      {/* Composer only on the Log tab, and hidden while reviewing a draft. */}
-      {tab === 'log' && !pendingDraft && (
+      {tab === 'log' && !editingEntry && (
         <Composer
           value={input} onChange={setInput} onSend={handleSend}
           busy={parsing} online={syncStatus.online}
@@ -2148,28 +2485,30 @@ export default function App({ appId, token }) {
         />
       )}
 
-      <nav style={S.tabbar} role="tablist" aria-label="Activity tabs">
-        <button style={S.tabBtn(tab === 'log')} onClick={() => setTab('log')}
-          role="tab" aria-selected={tab === 'log'} aria-label="Log">
-          <span style={S.tabIcon} aria-hidden>✎</span>Log
-        </button>
-        <button style={S.tabBtn(tab === 'insights')} onClick={() => setTab('insights')}
-          role="tab" aria-selected={tab === 'insights'} aria-label="Insights">
-          <span style={S.tabIcon} aria-hidden>▦</span>Insights
-        </button>
-        <button style={S.tabBtn(tab === 'all')} onClick={() => setTab('all')}
-          role="tab" aria-selected={tab === 'all'} aria-label="All entries">
-          <span style={S.tabIcon} aria-hidden>≣</span>All
-        </button>
-      </nav>
+      {!editingEntry && (
+        <nav style={S.tabbar} role="tablist" aria-label="Activity tabs">
+          <button style={S.tabBtn(tab === 'log')} onClick={() => setTab('log')}
+            role="tab" aria-selected={tab === 'log'} aria-label="Log">
+            <span style={S.tabIcon} aria-hidden>✎</span>Log
+          </button>
+          <button style={S.tabBtn(tab === 'insights')} onClick={() => setTab('insights')}
+            role="tab" aria-selected={tab === 'insights'} aria-label="Insights">
+            <span style={S.tabIcon} aria-hidden>▦</span>Insights
+          </button>
+          <button style={S.tabBtn(tab === 'all')} onClick={() => setTab('all')}
+            role="tab" aria-selected={tab === 'all'} aria-label="All entries">
+            <span style={S.tabIcon} aria-hidden>≣</span>All
+          </button>
+        </nav>
+      )}
 
       {deletePending && (
         <ConfirmModal
           title="Delete this entry?"
           body="It will be removed from your log and analytics. This can't be undone."
           confirmLabel="Delete"
-          onConfirm={() => { deleteEntry(deletePending); setDeletePending(null) }}
-          onCancel={() => setDeletePending(null)}
+          onConfirm={() => { deleteEntry(deletePending); closeNestedNav(); setDeletePending(null) }}
+          onCancel={() => { closeNestedNav(); setDeletePending(null) }}
         />
       )}
     </div>

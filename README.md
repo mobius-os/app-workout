@@ -13,7 +13,7 @@ Open the **App Store** mini-app in Möbius, search for "Workout", tap **Install*
 In the App Store, choose **Install from URL** and paste:
 
 ```
-https://raw.githubusercontent.com/mobius-os/app-gym/main/mobius.json
+https://raw.githubusercontent.com/mobius-os/app-workout/main/mobius.json
 ```
 
 ## How it works

@@ -84,6 +84,46 @@ test('normalizeEntry: negative weight is clamped to 0', () => {
   const e = normalizeEntry({ category: 'strength', metrics: { sets: [{ weight: -100, reps: 5, unit: 'kg' }] } })
   assert.equal(e.metrics.sets[0].weight_kg, 0)
 })
+test('normalizeEntry: unknown strength values stay n/a instead of becoming 0', () => {
+  const e = normalizeEntry({
+    category: 'strength',
+    activity: 'Deadlift',
+    metrics: {
+      sets: [
+        { weight: null, reps: null, unit: 'kg' },
+        { weight: null, reps: null, unit: 'kg' },
+        { weight: null, reps: null, unit: 'kg' },
+      ],
+    },
+  })
+  assert.deepEqual(e.metrics.sets, [
+    { weight_kg: null, reps: null, unit: 'kg' },
+    { weight_kg: null, reps: null, unit: 'kg' },
+    { weight_kg: null, reps: null, unit: 'kg' },
+  ])
+  assert.equal(summarizeMetrics(e), '3 sets')
+})
+test('summarizeMetrics formats partially-known strength sets without n/a noise', () => {
+  assert.equal(summarizeMetrics({
+    category: 'strength',
+    metrics: {
+      sets: [
+        { weight_kg: 100, reps: null, unit: 'kg' },
+        { weight_kg: 100, reps: null, unit: 'kg' },
+      ],
+    },
+  }), '2 sets @ 100kg')
+  assert.equal(summarizeMetrics({
+    category: 'strength',
+    metrics: {
+      sets: [
+        { weight_kg: null, reps: 5, unit: 'kg' },
+        { weight_kg: null, reps: 5, unit: 'kg' },
+        { weight_kg: null, reps: 5, unit: 'kg' },
+      ],
+    },
+  }), '3×5')
+})
 test('normalizeEntry: non-string activity falls back to the category label, no throw', () => {
   const e = normalizeEntry({ category: 'strength', activity: { x: 1 }, metrics: { sets: [] } })
   assert.equal(typeof e.activity, 'string')
@@ -157,6 +197,22 @@ test('normalizeEntry maps a hiking parse to cardio-family SI metrics', () => {
   assert.equal(e.metrics.distance_m, null)
   assert.match(summarizeMetrics(e), /8h/)
   assert.match(summarizeMetrics(e), /Hawaii/)
+})
+
+test('normalizeEntry: unknown cardio values stay n/a instead of becoming 0', () => {
+  const e = normalizeEntry({
+    category: 'hiking',
+    activity: 'Hike',
+    metrics: {
+      duration: { value: null, unit: 'h' },
+      distance: { value: null, unit: 'km' },
+      elevation: { value: null, unit: 'm' },
+    },
+  })
+  assert.equal(e.metrics.duration_s, null)
+  assert.equal(e.metrics.distance_m, null)
+  assert.equal(e.metrics.elevation_m, null)
+  assert.equal(summarizeMetrics(e), '')
 })
 
 test('normalizeEntry maps a running parse with distance + duration', () => {

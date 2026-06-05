@@ -65,8 +65,9 @@ export function fromKg(kg, unit) {
 
 // distance → metres. Accepts m, km, mi.
 export function toMetres(value, unit) {
+  if (value === '' || value == null) return null
   const v = Number(value)
-  if (!isFinite(v)) return 0
+  if (!isFinite(v)) return null
   if (unit === 'km') return Math.round(v * 1000)
   if (unit === 'mi') return Math.round(v * 1609.344)
   return Math.round(v)
@@ -74,8 +75,9 @@ export function toMetres(value, unit) {
 
 // duration → seconds. Accepts s, min, h.
 export function toSeconds(value, unit) {
+  if (value === '' || value == null) return null
   const v = Number(value)
-  if (!isFinite(v)) return 0
+  if (!isFinite(v)) return null
   if (unit === 'min') return Math.round(v * 60)
   if (unit === 'h') return Math.round(v * 3600)
   return Math.round(v)
@@ -185,13 +187,17 @@ export function normalizeEntry(parsed, opts = {}) {
   let metrics
   if (family === 'strength') {
     metrics = {
-      sets: (Array.isArray(m.sets) ? m.sets : []).map((s) => ({
-        // Store SI (kg). reps is dimensionless. We keep the user's display
-        // unit on the set so the card can echo "100kg" vs "225lb" back.
-        weight_kg: Math.max(0, toKg(s.weight, s.unit || 'kg')),
-        reps: Math.max(0, Math.round(Number(s.reps) || 0)),
-        unit: s.unit === 'lb' ? 'lb' : 'kg',
-      })),
+      sets: (Array.isArray(m.sets) ? m.sets : []).map((s) => {
+        const rawWeight = finiteMetricNumber(s.weight)
+        const rawReps = finiteMetricNumber(s.reps)
+        return {
+          // Store SI (kg). reps is dimensionless. We keep the user's display
+          // unit on the set so the card can echo "100kg" vs "225lb" back.
+          weight_kg: rawWeight == null ? null : Math.max(0, toKg(rawWeight, s.unit || 'kg')),
+          reps: rawReps == null ? null : Math.max(0, Math.round(rawReps)),
+          unit: s.unit === 'lb' ? 'lb' : 'kg',
+        }
+      }),
     }
   } else if (family === 'cardio') {
     metrics = {
@@ -230,8 +236,15 @@ function textOrNull(value) {
 }
 
 function numberOrNull(value) {
+  if (value === '' || value == null) return null
   const n = Number(value)
   return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+function finiteMetricNumber(value) {
+  if (value === '' || value == null) return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
 }
 
 function normalizeStoredEntry(entry) {
@@ -246,12 +259,20 @@ function normalizeStoredEntry(entry) {
   if (family === 'strength') {
     metrics = {
       sets: (Array.isArray(sourceMetrics.sets) ? sourceMetrics.sets : [])
-        .map((s) => ({
-          weight_kg: numberOrNull(s?.weight_kg ?? toKg(s?.weight, s?.unit || 'kg')) ?? 0,
-          reps: Math.max(0, Math.round(Number(s?.reps) || 0)),
-          unit: s?.unit === 'lb' ? 'lb' : 'kg',
-        }))
-        .filter((s) => s.weight_kg > 0 || s.reps > 0),
+        .map((s) => {
+          const sourceWeight = s?.weight_kg ?? (
+            numberOrNull(s?.weight) == null ? null : toKg(s?.weight, s?.unit || 'kg')
+          )
+          const weight_kg = numberOrNull(sourceWeight)
+          const reps = numberOrNull(s?.reps) == null ? null : Math.max(0, Math.round(Number(s.reps)))
+          if (Number(sourceWeight) < 0 && (!reps || reps <= 0)) return null
+          return {
+            weight_kg,
+            reps,
+            unit: s?.unit === 'lb' ? 'lb' : 'kg',
+          }
+        })
+        .filter(Boolean)
     }
   } else if (family === 'cardio') {
     metrics = {
@@ -598,13 +619,16 @@ function summarizeStrengthSets(sets) {
   const groups = new Map()
   for (const s of rows) {
     const unit = s.unit === 'lb' ? 'lb' : 'kg'
-    const weight = fromKg(s.weight_kg, unit)
-    const reps = Math.max(0, Math.round(Number(s.reps) || 0))
-    const key = `${reps}|${weight}|${unit}`
+    const weight = numberOrNull(s.weight_kg) == null ? null : fromKg(s.weight_kg, unit)
+    const reps = numberOrNull(s.reps) == null ? null : Math.max(0, Math.round(Number(s.reps)))
+    const key = `${reps ?? 'n/a'}|${weight ?? 'n/a'}|${unit}`
     groups.set(key, (groups.get(key) || 0) + 1)
   }
   return [...groups.entries()].map(([key, count]) => {
     const [reps, weight, unit] = key.split('|')
+    if (reps === 'n/a' && weight === 'n/a') return count === 1 ? '1 set' : `${count} sets`
+    if (reps === 'n/a') return count === 1 ? `1 set @ ${weight}${unit}` : `${count} sets @ ${weight}${unit}`
+    if (weight === 'n/a') return `${count}×${reps}`
     return `${count}×${reps} @ ${weight}${unit}`
   }).join(' · ')
 }
