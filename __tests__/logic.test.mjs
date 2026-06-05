@@ -263,6 +263,8 @@ test('current session finishes complete mixed activities at the session start ti
   assert.deepEqual(entries.map((entry) => entry.sessionId), ['session-demo', 'session-demo'])
   assert.deepEqual(entries.map((entry) => entry.ts), [startedAt, startedAt + 1000])
   assert.equal(entries[0].localDate, localDate(new Date(startedAt)))
+  assert.notEqual(entries[0].id, 'deadlift')
+  assert.notEqual(entries[1].id, 'swim')
 })
 
 test('current session requires duration or distance for cardio drafts', () => {
@@ -293,6 +295,32 @@ test('current session treats generic strength activity as missing exercise name'
   assert.equal(session.entries[0].activity, 'Strength')
   assert.equal(sessionEntryMissing(session.entries[0]), 'activity')
   assert.equal(currentSessionReady(session), false)
+})
+
+test('current session treats zero-valued required metrics as missing', () => {
+  const strength = normalizeCurrentSession({
+    startedAt: 1_700_000_000_000,
+    entries: [{
+      ts: 1,
+      category: 'strength',
+      activity: 'Deadlift',
+      metrics: { sets: [{ weight_kg: 0, reps: 5, unit: 'kg' }] },
+    }],
+  })
+  const swim = normalizeCurrentSession({
+    startedAt: 1_700_000_000_000,
+    entries: [{
+      ts: 1,
+      category: 'swimming',
+      activity: 'Swim',
+      metrics: { duration_s: 0, distance_m: 0 },
+    }],
+  })
+
+  assert.match(sessionEntryMissing(strength.entries[0]), /reps and weight/)
+  assert.match(sessionEntryMissing(swim.entries[0]), /duration or distance/)
+  assert.equal(currentSessionReady(strength), false)
+  assert.equal(currentSessionReady(swim), false)
 })
 
 test('normalizeEntry maps a running parse with distance + duration', () => {

@@ -369,28 +369,31 @@ export function sessionEntryMissing(entry) {
   if (fam === 'strength') {
     const sets = Array.isArray(entry.metrics?.sets) ? entry.metrics.sets : []
     if (sets.length === 0) return `${activity} sets`
-    const incomplete = sets.find((set) => numberOrNull(set?.weight_kg) == null || numberOrNull(set?.reps) == null)
+    const incomplete = sets.find((set) => {
+      const weight = numberOrNull(set?.weight_kg)
+      const reps = numberOrNull(set?.reps)
+      return weight == null || weight <= 0 || reps == null || reps <= 0
+    })
     if (incomplete) return `${activity} reps and weight`
     return null
   }
   if (fam === 'cardio') {
-    if (numberOrNull(entry.metrics?.duration_s) == null && numberOrNull(entry.metrics?.distance_m) == null) {
+    const duration = numberOrNull(entry.metrics?.duration_s)
+    const distance = numberOrNull(entry.metrics?.distance_m)
+    if ((duration == null || duration <= 0) && (distance == null || distance <= 0)) {
       return `${activity} duration or distance`
     }
     return null
   }
+  const duration = numberOrNull(entry.metrics?.duration_s)
   if (
-    numberOrNull(entry.metrics?.duration_s) == null &&
+    (duration == null || duration <= 0) &&
     !textOrNull(entry.metrics?.note) &&
     !textOrNull(entry.metrics?.location)
   ) {
     return `${activity} duration or note`
   }
   return null
-}
-
-export function sessionEntriesReady(entries) {
-  return normalizeStoredEntries(entries).filter((entry) => !sessionEntryMissing(entry))
 }
 
 export function currentSessionReady(session) {
@@ -403,7 +406,7 @@ export function entriesFromCurrentSession(session) {
   if (!normalized || !currentSessionReady(normalized)) return []
   return normalized.entries.map((entry, index) => ({
     ...entry,
-    id: textOrNull(entry.id) || uid(),
+    id: uid(),
     ts: normalized.startedAt + index * 1000,
     localDate: normalized.localDate,
     sessionId: normalized.id,
