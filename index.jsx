@@ -673,6 +673,21 @@ export {
 }
 // ===== INLINE-LOGIC END =====
 
+const CHAT_HEIGHT_CACHE_VERSION = 1
+
+function chatHeightKey(appId) {
+  return `workout:${appId}:chat-height:v${CHAT_HEIGHT_CACHE_VERSION}`
+}
+
+function readChatHeight(appId) {
+  if (typeof localStorage === 'undefined') return 44
+  const saved = localStorage.getItem(chatHeightKey(appId))
+  if (saved == null) return 44
+  const raw = Number(saved)
+  if (!Number.isFinite(raw)) return 44
+  return Math.min(68, Math.max(30, raw))
+}
+
 // ---------------------------------------------------------------------------
 // Category icons — the rendering half of CATEGORIES. logic.js stores a Tabler
 // icon KEY per category (it stays JSX-free); this map turns that key into the
@@ -938,12 +953,12 @@ const S = {
     width: '100%', maxWidth: '720px', marginLeft: 'auto', marginRight: 'auto',
   },
   header: {
-    padding: '18px 20px 14px', display: 'flex', alignItems: 'center',
+    padding: '12px 16px 10px', display: 'flex', alignItems: 'center',
     justifyContent: 'space-between', flexShrink: 0,
     borderBottom: '1px solid var(--border)',
-    background: 'linear-gradient(180deg, rgba(255,255,255,0.03), transparent)',
+    background: 'var(--surface)',
   },
-  title: { fontSize: '22px', fontWeight: 760, letterSpacing: 0, margin: 0 },
+  title: { fontSize: '18px', fontWeight: 760, letterSpacing: 0, margin: 0 },
   subtitle: { fontSize: '12px', color: 'var(--muted)', margin: '2px 0 0' },
 
   scroll: {
@@ -955,14 +970,14 @@ const S = {
 
   tabbar: {
     flexShrink: 0,
-    display: 'flex', background: 'color-mix(in srgb, var(--surface) 94%, #000)',
+    display: 'flex', background: 'var(--surface)',
     borderBottom: '1px solid var(--border)',
-    padding: '6px 10px',
-    gap: '6px',
+    padding: '8px 12px',
+    gap: '4px',
   },
   tabBtn: (active) => ({
     flex: 1, padding: '10px 8px', border: '1px solid transparent', cursor: 'pointer',
-    borderRadius: '12px',
+    borderRadius: '8px',
     background: active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
     color: active ? 'var(--text)' : 'var(--muted)',
     fontFamily: 'var(--font)', fontSize: '12px', fontWeight: 700,
@@ -972,13 +987,30 @@ const S = {
   tabIcon: { display: 'flex', lineHeight: 1 },
 
   chatPanel: {
-    flex: '0 0 38%',
-    minHeight: '240px',
-    maxHeight: '56%',
+    flex: '0 0 auto',
+    minHeight: 'min(240px, 50%)',
+    maxHeight: 'calc(100% - 160px)',
     display: 'flex',
     flexDirection: 'column',
     background: 'var(--surface)',
     borderTop: '1px solid var(--border)',
+  },
+  chatResizer: {
+    flex: '0 0 9px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'ns-resize',
+    background: 'var(--surface)',
+    borderTop: '1px solid var(--border)',
+    borderBottom: '1px solid var(--border)',
+    touchAction: 'none',
+  },
+  chatResizerBar: {
+    width: '44px',
+    height: '3px',
+    borderRadius: '999px',
+    background: 'color-mix(in srgb, var(--muted) 65%, transparent)',
   },
   chatHead: {
     flex: '0 0 auto',
@@ -1575,7 +1607,7 @@ function groupEntriesByDate(entries) {
     .map(([date, rows]) => ({ date, entries: rows }))
 }
 
-function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged }) {
+function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height }) {
   const mountRef = useRef(null)
   const [chatId, setChatId] = useState(null)
   const [error, setError] = useState(null)
@@ -1656,7 +1688,7 @@ function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged }) {
   }, [chatId, store, systemPrompt])
 
   return (
-    <section style={S.chatPanel}>
+    <section className="workout-chat-panel" style={{ ...S.chatPanel, flex: `0 0 ${height}%` }}>
       <div style={S.chatHead}>
         <span style={S.chatHeadTitle}>Agent</span>
         <span style={S.chatHeadHint}>Tell it what you trained — it edits the log</span>
@@ -1705,8 +1737,7 @@ function LogTab({ entries, onDelete, onEdit }) {
         <div style={S.emptyIcon}>
           <SportIcon name="barbell" color="var(--accent)" size={30} />
         </div>
-        <strong style={{ color: 'var(--text)' }}>Start with one sentence.</strong><br />
-        Try "ran 5k in 24 min", "3x5 squat at 80kg", or "hiked 8h in Hawaii".
+        <strong style={{ color: 'var(--text)' }}>No workouts yet.</strong>
       </div>
     )
   }
@@ -2075,12 +2106,19 @@ export default function App({ appId, token }) {
   const [bootStatus, setBootStatus] = useState('loading')
   const syncStatus = useSyncStatus(store)
   const saveQueueRef = useRef({ inFlight: false, pending: null })
+  const bodyRef = useRef(null)
+  const [chatHeight, setChatHeight] = useState(() => readChatHeight(appId))
 
   const [editingEntry, setEditingEntry] = useState(null)
   const [deletePending, setDeletePending] = useState(null) // entry id awaiting confirm
   const navHandleRef = useRef(null)
 
   const bumpSync = syncStatus.bump
+
+  useEffect(() => {
+    if (typeof localStorage === 'undefined') return
+    try { localStorage.setItem(chatHeightKey(appId), String(chatHeight)) } catch {}
+  }, [appId, chatHeight])
 
   const loadEntries = useCallback(async (options = {}) => {
     const loaded = await store.get('entries.json')
@@ -2178,6 +2216,50 @@ export default function App({ appId, token }) {
     persist((entries || []).filter((e) => e.id !== id), { deletedIds: [id] })
   }, [entries, persist])
 
+  const resizeChatBy = useCallback((deltaPct) => {
+    setChatHeight((value) => Math.min(68, Math.max(30, value + deltaPct)))
+  }, [])
+
+  const beginChatResize = useCallback((event) => {
+    event.preventDefault()
+    const body = bodyRef.current
+    const panel = body?.querySelector?.('.workout-chat-panel')
+    if (!body || !panel) return
+    const total = body.getBoundingClientRect().height
+    if (!total) return
+    const startY = event.clientY
+    const startHeight = panel.getBoundingClientRect().height
+    const minPx = Math.min(240, total * 0.3)
+    const maxPx = Math.max(minPx, total - 160)
+
+    const onMove = (moveEvent) => {
+      const nextPx = Math.min(maxPx, Math.max(minPx, startHeight + startY - moveEvent.clientY))
+      setChatHeight(Math.min(68, Math.max(30, (nextPx / total) * 100)))
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp, { once: true })
+  }, [])
+
+  const handleResizeKey = useCallback((event) => {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      resizeChatBy(4)
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      resizeChatBy(-4)
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      setChatHeight(30)
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      setChatHeight(68)
+    }
+  }, [resizeChatBy])
+
   const closeNestedNav = useCallback(() => {
     try { navHandleRef.current?.close?.() } catch {}
     navHandleRef.current = null
@@ -2256,54 +2338,74 @@ export default function App({ appId, token }) {
         </nav>
       )}
 
-      <div style={S.scroll}>
-        <div style={S.inner}>
-          {editingEntry ? (
-            <ConfirmCard
-              draft={draftFromStoredEntry(editingEntry)}
-              ambiguous={!editingEntry.confirmed}
-              clarification={!editingEntry.confirmed ? 'Some fields may still be n/a.' : ''}
-              initialTs={editingEntry.ts}
-              title="Edit log entry"
-              commitLabel="Save changes"
-              onCommit={commitEditedEntry}
-              onCancel={() => {
-                closeNestedNav()
-                setEditingEntry(null)
-              }}
-            />
-          ) : (
-            <>
-              {tab === 'log' && (
-                <LogTab
-                  entries={entries}
-                  onDelete={openDeleteConfirm}
-                  onEdit={openEditEntry}
-                />
-              )}
-              {tab === 'insights' && (
-                <InsightsTab entries={entries} />
-              )}
-              {tab === 'all' && (
-                <AllTab
-                  entries={entries}
-                  onDelete={openDeleteConfirm}
-                  onEdit={(entry) => openEditEntry(entry, 'log')}
-                />
-              )}
-            </>
-          )}
+      <div ref={bodyRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={S.scroll}>
+          <div style={S.inner}>
+            {editingEntry ? (
+              <ConfirmCard
+                draft={draftFromStoredEntry(editingEntry)}
+                ambiguous={!editingEntry.confirmed}
+                clarification={!editingEntry.confirmed ? 'Some fields may still be n/a.' : ''}
+                initialTs={editingEntry.ts}
+                title="Edit log entry"
+                commitLabel="Save changes"
+                onCommit={commitEditedEntry}
+                onCancel={() => {
+                  closeNestedNav()
+                  setEditingEntry(null)
+                }}
+              />
+            ) : (
+              <>
+                {tab === 'log' && (
+                  <LogTab
+                    entries={entries}
+                    onDelete={openDeleteConfirm}
+                    onEdit={openEditEntry}
+                  />
+                )}
+                {tab === 'insights' && (
+                  <InsightsTab entries={entries} />
+                )}
+                {tab === 'all' && (
+                  <AllTab
+                    entries={entries}
+                    onDelete={openDeleteConfirm}
+                    onEdit={(entry) => openEditEntry(entry, 'log')}
+                  />
+                )}
+              </>
+            )}
+          </div>
         </div>
-      </div>
 
-      {!editingEntry && (
-        <AgentChatPanel
-          appId={appId}
-          token={token}
-          store={store}
-          onEntriesMaybeChanged={() => loadEntries({ allowMigration: false })}
-        />
-      )}
+        {!editingEntry && tab === 'log' && (
+          <>
+            <div
+              style={S.chatResizer}
+              className="workout-chat-resizer"
+              role="separator"
+              aria-label="Resize workout chat"
+              aria-orientation="horizontal"
+              aria-valuemin={30}
+              aria-valuemax={68}
+              aria-valuenow={Math.round(chatHeight)}
+              tabIndex={0}
+              onPointerDown={beginChatResize}
+              onKeyDown={handleResizeKey}
+            >
+              <span style={S.chatResizerBar} aria-hidden />
+            </div>
+            <AgentChatPanel
+              appId={appId}
+              token={token}
+              store={store}
+              height={chatHeight}
+              onEntriesMaybeChanged={() => loadEntries({ allowMigration: false })}
+            />
+          </>
+        )}
+      </div>
 
       {deletePending && (
         <ConfirmModal
