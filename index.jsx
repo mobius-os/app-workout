@@ -680,12 +680,12 @@ function chatHeightKey(appId) {
 }
 
 function readChatHeight(appId) {
-  if (typeof localStorage === 'undefined') return 44
+  if (typeof localStorage === 'undefined') return 64
   const saved = localStorage.getItem(chatHeightKey(appId))
-  if (saved == null) return 44
+  if (saved == null) return 64
   const raw = Number(saved)
-  if (!Number.isFinite(raw)) return 44
-  return Math.min(68, Math.max(30, raw))
+  if (!Number.isFinite(raw)) return 64
+  return Math.min(82, Math.max(44, raw))
 }
 
 // ---------------------------------------------------------------------------
@@ -988,12 +988,11 @@ const S = {
 
   chatPanel: {
     flex: '0 0 auto',
-    minHeight: 'min(240px, 50%)',
-    maxHeight: 'calc(100% - 160px)',
+    minHeight: 'min(360px, 70%)',
+    maxHeight: 'calc(100% - 110px)',
     display: 'flex',
     flexDirection: 'column',
-    background: 'var(--surface)',
-    borderTop: '1px solid var(--border)',
+    background: 'var(--bg)',
   },
   chatResizer: {
     flex: '0 0 9px',
@@ -1084,13 +1083,13 @@ const S = {
   entryCard: {
     background: 'color-mix(in srgb, var(--surface) 94%, #000)',
     border: '1px solid var(--border)',
-    borderRadius: '8px', padding: '13px', marginBottom: '10px',
-    display: 'flex', gap: '12px', alignItems: 'flex-start',
+    borderRadius: '8px', padding: '10px', marginBottom: '8px',
+    display: 'flex', gap: '10px', alignItems: 'center',
   },
   entryIcon: (color) => ({
-    width: '42px', height: '42px', borderRadius: '8px', flexShrink: 0,
+    width: '34px', height: '34px', borderRadius: '8px', flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '20px', background: `${color}22`, border: `1px solid ${color}55`,
+    fontSize: '18px', background: `${color}22`, border: `1px solid ${color}55`,
   }),
   entryBody: { flex: 1, minWidth: 0 },
   entryTop: { display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'baseline' },
@@ -1098,7 +1097,14 @@ const S = {
   entryTime: { fontSize: '11px', color: 'var(--muted)', whiteSpace: 'nowrap' },
   entryMeta: { fontSize: '13px', color: 'var(--text)', margin: '5px 0 0', fontVariantNumeric: 'tabular-nums' },
   entryRaw: { fontSize: '11px', color: 'var(--muted)', margin: '6px 0 0', fontStyle: 'italic' },
-  entryActions: { display: 'flex', flexDirection: 'column', gap: '4px', flexShrink: 0 },
+  entryActions: { display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 },
+  iconBtn: (color = 'var(--muted)') => ({
+    width: '32px', height: '32px', borderRadius: '8px',
+    border: 'none', background: 'transparent', color,
+    fontFamily: 'var(--font)', fontSize: '14px', fontWeight: 800,
+    cursor: 'pointer', display: 'inline-flex', alignItems: 'center',
+    justifyContent: 'center', lineHeight: 1,
+  }),
 
   sessionLabel: {
     display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '12px',
@@ -1658,6 +1664,7 @@ function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height }) 
       chatId,
       title: 'Workout',
       systemPrompt,
+      picker: true,
     }).then((nextHandle) => {
       if (disposed) {
         nextHandle.destroy()
@@ -1689,10 +1696,6 @@ function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height }) 
 
   return (
     <section className="workout-chat-panel" style={{ ...S.chatPanel, flex: `0 0 ${height}%` }}>
-      <div style={S.chatHead}>
-        <span style={S.chatHeadTitle}>Agent</span>
-        <span style={S.chatHeadHint}>Tell it what you trained — it edits the log</span>
-      </div>
       {error && <div style={S.chatError}>{error}</div>}
       <style>{'.workout-chat-embed iframe{display:block;width:100%;height:100%;border:0}'}</style>
       <div className="workout-chat-embed" style={S.chatEmbed} ref={mountRef} />
@@ -1717,12 +1720,16 @@ function EntryCard({ entry, onDelete, onEdit }) {
       </div>
       <div style={S.entryActions}>
         <button
-          style={{ ...S.btnGhost, color: 'var(--accent)', padding: '4px 8px', minHeight: '36px' }}
-          onClick={() => onEdit(entry)} aria-label={`Edit ${entry.activity}`}
-        >Edit</button>
+          style={S.iconBtn('var(--accent)')}
+          onClick={() => onEdit(entry)}
+          aria-label={`Edit ${entry.activity}`}
+          title="Edit"
+        >✎</button>
         <button
-          style={{ ...S.btnGhost, color: 'var(--muted)', padding: '4px 8px', minHeight: '36px' }}
-          onClick={() => onDelete(entry.id)} aria-label={`Delete ${entry.activity}`}
+          style={S.iconBtn('var(--muted)')}
+          onClick={() => onDelete(entry.id)}
+          aria-label={`Delete ${entry.activity}`}
+          title="Delete"
         >×</button>
       </div>
     </div>
@@ -2217,7 +2224,7 @@ export default function App({ appId, token }) {
   }, [entries, persist])
 
   const resizeChatBy = useCallback((deltaPct) => {
-    setChatHeight((value) => Math.min(68, Math.max(30, value + deltaPct)))
+    setChatHeight((value) => Math.min(82, Math.max(44, value + deltaPct)))
   }, [])
 
   const beginChatResize = useCallback((event) => {
@@ -2229,12 +2236,12 @@ export default function App({ appId, token }) {
     if (!total) return
     const startY = event.clientY
     const startHeight = panel.getBoundingClientRect().height
-    const minPx = Math.min(240, total * 0.3)
-    const maxPx = Math.max(minPx, total - 160)
+    const minPx = Math.min(360, total * 0.44)
+    const maxPx = Math.max(minPx, total - 110)
 
     const onMove = (moveEvent) => {
       const nextPx = Math.min(maxPx, Math.max(minPx, startHeight + startY - moveEvent.clientY))
-      setChatHeight(Math.min(68, Math.max(30, (nextPx / total) * 100)))
+      setChatHeight(Math.min(82, Math.max(44, (nextPx / total) * 100)))
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -2253,10 +2260,10 @@ export default function App({ appId, token }) {
       resizeChatBy(-4)
     } else if (event.key === 'Home') {
       event.preventDefault()
-      setChatHeight(30)
+      setChatHeight(44)
     } else if (event.key === 'End') {
       event.preventDefault()
-      setChatHeight(68)
+      setChatHeight(82)
     }
   }, [resizeChatBy])
 
@@ -2387,8 +2394,8 @@ export default function App({ appId, token }) {
               role="separator"
               aria-label="Resize workout chat"
               aria-orientation="horizontal"
-              aria-valuemin={30}
-              aria-valuemax={68}
+              aria-valuemin={44}
+              aria-valuemax={82}
               aria-valuenow={Math.round(chatHeight)}
               tabIndex={0}
               onPointerDown={beginChatResize}

@@ -1,8 +1,8 @@
 {
   "id": "gym",
   "name": "Workout",
-  "version": "2.2.4",
-  "description": "Clean embedded-agent training log. Tell the Workout agent what you did — \"three sets of deadlifts and one hour climbing\" — and it maintains entries.json while the structured, editable log refreshes after each turn. Includes a bounded resizable chat, strength PRs (e1RM), cardio bests, weekly category volume, per-category stats, and a year-at-a-glance streak heatmap.",
+  "version": "2.2.5",
+  "description": "Chat-first embedded-agent training log. Tell the Workout agent what you did — \"three sets of deadlifts and one hour climbing\" — and it maintains entries.json while the structured, editable log refreshes after each turn. Uses the real Möbius embedded chat with model picker, plus strength PRs, cardio bests, weekly volume, category stats, and a streak heatmap.",
   "author": "mobius-os",
   "license": "MIT",
   "homepage": "https://github.com/mobius-os/app-workout",

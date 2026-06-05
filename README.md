@@ -18,7 +18,7 @@ https://raw.githubusercontent.com/mobius-os/app-workout/main/mobius.json
 
 ## How it works
 
-An embedded Möbius chat sits at the bottom of the **Log** tab. Tell the Workout agent what you did — for example, `three sets of deadlifts and one hour climbing` — and the agent maintains `entries.json` directly. The structured log refreshes after each chat turn, unknown metrics stay `n/a`/`null`, and the agent can ask follow-up questions in the same persistent transcript. You can still edit or delete saved entries from the structured log. Model/provider selection is the normal embedded-chat picker, the same path used by the LaTeX app.
+An embedded Möbius chat is the primary surface of the **Log** tab. Tell the Workout agent what you did — for example, `three sets of deadlifts and one hour climbing` — and the agent maintains `entries.json` directly. The structured log refreshes after each chat turn, unknown metrics stay `n/a`/`null`, and the agent can ask follow-up questions in the same persistent transcript. You can still edit or delete saved entries from the structured log. Model/provider selection is the normal embedded-chat picker, the same path used by the LaTeX app.
 
 Three bottom tabs:
 
