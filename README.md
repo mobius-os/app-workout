@@ -18,11 +18,11 @@ https://raw.githubusercontent.com/mobius-os/app-workout/main/mobius.json
 
 ## How it works
 
-A sticky composer — styled like the Möbius chat composer — sits at the bottom of the **Log** tab. You type a sentence; the app sends it to the on-device agent proxy (`/api/ai`) with a JSON-only prompt that returns a category, an activity name, and structured metrics. Every parse opens an **editable confirm card** before anything is saved — nothing auto-commits, and an ambiguous or unparseable entry still lands as a card you can fill in by hand. Offline, the composer skips the model and opens a blank manual-entry card directly.
+An embedded Möbius chat sits at the bottom of the **Log** tab. Tell the Workout agent what you did — for example, `three sets of deadlifts and one hour climbing` — and the agent maintains `entries.json` directly. The structured log refreshes after each chat turn, unknown metrics stay `n/a`/`null`, and the agent can ask follow-up questions in the same persistent transcript. You can still edit or delete saved entries from the structured log.
 
 Three bottom tabs:
 
-- **Log** — the composer plus your entries grouped into sessions (entries within 4 hours of each other share a session). A follow-up like "another set with 90" resolves against the session you're mid-way through, because the app passes the open session as context to the model.
+- **Log** — the embedded Workout chat plus your entries grouped into sessions (entries within 4 hours of each other share a session). A follow-up like "another set with 90" resolves in the ongoing chat context.
 - **Insights** — analytics *by category*: a donut of your category split, a stacked volume-over-time bar (strength = kg·reps, cardio = km, other = minutes), a strength PR table ranked by estimated 1-rep max (Epley), cardio bests, and a year-at-a-glance streak heatmap. The charting library isn't precached for offline, so when you're offline Insights gracefully degrades to the streak + heatmap (which need no library).
 - **All** — a flat, newest-first list of every entry, with delete.
 

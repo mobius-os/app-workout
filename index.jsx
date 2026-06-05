@@ -114,7 +114,7 @@ function uid() {
 // wrapped in prose or ```json fences. A greedy /\{[\s\S]*\}/ breaks when the
 // model adds a trailing brace or commentary after the object; this scans each
 // '{' for a string-aware balanced match and returns the first that JSON.parses
-// (or null). Used to read the model's reply in handleSend.
+// (or null). Kept for tests and legacy parsed payload migration.
 function extractFirstJsonObject(text) {
   if (typeof text !== 'string') return null
   for (let i = text.indexOf('{'); i >= 0; i = text.indexOf('{', i + 1)) {
@@ -139,14 +139,13 @@ function extractFirstJsonObject(text) {
 }
 
 // ---------------------------------------------------------------------------
-// parseEntry → normalizeEntry. The LLM returns a loose, display-unit JSON
-// blob; normalizeEntry turns it into the canonical stored Entry shape with SI
-// units, a clamped category, and a stable id+ts. This is the single mapping
-// the confirm card edits and `commitEntry` appends — keeping it pure means a
-// test can feed a hand-written "parsed" object (standing in for the LLM) and
-// assert the stored entry exactly.
+// parseEntry → normalizeEntry. Older/custom parsers returned a loose,
+// display-unit JSON blob; normalizeEntry turns that into the canonical stored
+// Entry shape with SI units, a clamped category, and a stable id+ts. Keeping
+// it pure means tests can feed a hand-written "parsed" object and assert the
+// stored entry exactly.
 //
-// parsed shape (from /api/ai):
+// parsed shape:
 //   { category, activity, icon?, metrics, ambiguous?, clarification? }
 // or for multi-activity input:
 //   { entries: [{ category, activity, metrics, ambiguous?, clarification? }],
@@ -837,112 +836,90 @@ function makeStore(appId, token) {
 }
 
 // ---------------------------------------------------------------------------
-// AI streaming helper — same pattern as cycle-tracker. POST /api/ai, read the
-// SSE stream, accumulate text. The model is told to return JSON-only; the
-// caller JSON.parses the accumulated text (matching `{ ... }`).
+// Embedded shell chat. Like the LaTeX app, Workout uses the real Möbius chat
+// iframe as the interaction surface. The sub-agent edits entries.json; the
+// mini-app refreshes structured state after each turn.
 // ---------------------------------------------------------------------------
 
-async function* streamAi(messages, system, token) {
-  const res = await fetch('/api/ai', {
+function workoutAgentPrompt(appId) {
+  return [
+    `You are the Workout training-log sub-agent for Möbius app id ${appId}.`,
+    '',
+    `Your job is to maintain /data/apps/${appId}/entries.json as the user's`,
+    'structured workout log. The user should talk to you naturally. Your',
+    'default action is to update the log, not to tell the user how to fill a',
+    'form. If details are missing, write the best-effort entry with null',
+    'numeric values, then ask a short follow-up question in chat.',
+    '',
+    'Always read the existing entries.json before writing. If it is missing,',
+    'treat it as an empty JSON array. Preserve existing entries unless the user',
+    'asks you to change or delete them. Write the whole JSON array back after',
+    'changes.',
+    '',
+    'Entry shape:',
+    '{',
+    '  "id": "stable unique string",',
+    '  "ts": 1780000000000,',
+    '  "localDate": "YYYY-MM-DD",',
+    '  "sessionId": "s-<timestamp>",',
+    '  "category": "strength|cardio|running|cycling|swimming|rowing|hiking|yoga|sport|other",',
+    '  "activity": "Deadlift",',
+    '  "icon": "barbell|heartbeat|run|bike|swimming|kayak|mountain|yoga|ball-football|sparkles",',
+    '  "metrics": { ... },',
+    '  "raw": "the user text that caused/updated this entry",',
+    '  "source": "ai",',
+    '  "confirmed": true',
+    '}',
+    '',
+    'Use the current date/time for new entries unless the user gives another',
+    'date/time. localDate is the user-facing local day. For now, grouping is',
+    'by localDate; sessionId can be "s-" plus the entry timestamp, or reused',
+    'for entries from the same message.',
+    '',
+    'Metric rules:',
+    '- strength metrics: {"sets":[{"weight_kg": number|null, "reps": number|null, "unit":"kg"|"lb"}]}. Use null for unknown weight or reps. If the user says "three sets of deadlifts", write three set objects with null weight_kg and null reps.',
+    '- cardio/running/cycling/swimming/rowing/hiking metrics: {"duration_s": number|null, "distance_m": number|null, "elevation_m": number|null, "location": string|null}.',
+    '- yoga/sport/other metrics: {"duration_s": number|null, "location": string|null, "note": string|null}.',
+    '',
+    'Icon keys by category: strength=barbell, cardio=heartbeat, running=run, cycling=bike, swimming=swimming, rowing=kayak, hiking=mountain, yoga=yoga, sport=ball-football, other=sparkles.',
+    '',
+    'Example: if the user says "I have done three sets of deadlifts and one',
+    'hour climbing", append a Deadlift strength entry with three unknown sets',
+    'and a Climbing sport entry with duration_s 3600. Then ask "How many reps',
+    'did you do for the deadlift sets?" Do not wait to create the entries.',
+    '',
+    'When the user answers a follow-up, update the existing entry rather than',
+    'creating a duplicate. Keep unknown fields as null. Never use 0 to mean',
+    'unknown.',
+  ].join('\n')
+}
+
+async function createAppChat(appId, token, systemPrompt) {
+  const r = await fetch('/api/app-chats', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ messages, system, tools: false }),
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ title: 'Workout', system_prompt: systemPrompt }),
   })
-  if (!res.ok || !res.body) {
-    throw new Error(`AI request failed (${res.status})`)
-  }
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const lines = buf.split('\n')
-    buf = lines.pop() ?? ''
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        try { yield JSON.parse(line.slice(6)) } catch { /* skip malformed */ }
-      }
-    }
-  }
+  if (!r.ok) throw new Error(`create chat -> ${r.status}`)
+  const data = await r.json()
+  if (!data || !data.id) throw new Error('create chat returned no id')
+  return String(data.id)
 }
 
-// The JSON-only system prompt. The model picks category KEYs from the enum
-// (the app owns icon+color), extracts one or more activity entries + metrics in
-// the shape that matches each category family, and flags ambiguity per entry.
-// Current-session context is appended so "another set with 90" resolves
-// against the last lift.
-const AI_SYSTEM = `You convert a person's natural-language description of a physical activity into structured JSON. Return ONLY valid JSON, no markdown fences, no prose.
-
-Pick a category KEY from exactly this list (do not invent new keys):
-strength, cardio, running, cycling, swimming, rowing, hiking, yoga, sport, other.
-- strength: lifting weights, bodyweight resistance (squats, bench, deadlift, pull-ups).
-- running / cycling / swimming, rowing / hiking: use the specific key when the activity names it; otherwise use cardio for generic conditioning (HIIT, elliptical, jump rope).
-- yoga: yoga, pilates, stretching, mobility.
-- sport: football, basketball, tennis, climbing, martial arts, a match or game.
-- other: anything that doesn't fit (a walk, gardening, a long event like a triathlon if mixed — choose the dominant leg or 'other').
-
-Metrics shape depends on the category family. Use null for unknown numeric fields; never invent 0 as a placeholder for an unknown value.
-- strength → {"sets": [{"weight": number|null, "reps": number|null, "unit": "kg"|"lb"}]}. One object per set. If the user logs multiple identical sets ("3 sets of 5 at 100kg"), expand to 3 set objects. If they only say "three sets of deadlifts", return three set objects with null weight and null reps.
-- cardio family (cardio/running/cycling/swimming/rowing/hiking) → {"duration": {"value": number, "unit": "s"|"min"|"h"}, "distance": {"value": number, "unit": "m"|"km"|"mi"}, "elevation": {"value": number, "unit": "m"|"km"}, "location": "string"}. Include only the fields the user mentioned.
-- yoga, sport, other → {"duration": {"value": number, "unit": "s"|"min"|"h"}, "location": "string", "note": "string"}.
-
-If the user describes multiple activities in one message, return one entry per activity in chronological order. Do not collapse "deadlift, climbing, bench" into one entry. Preserve clear entries even when a later entry needs clarification.
-
-Return this exact top-level shape:
-{
-  "entries": [
-    {
-      "category": "<key>",
-      "activity": "<short human name, e.g. 'Deadlift', 'Climbing', 'Bench press'>",
-      "metrics": { ... shape above ... },
-      "ambiguous": <true|false>,
-      "clarification": "<a short question to ask for this entry ONLY if ambiguous, else empty string>"
-    }
-  ],
-  "ambiguous": <true|false>,
-  "clarification": "<one short overall question ONLY if every entry shares the same ambiguity, else empty string>"
-}
-
-Set "ambiguous": true and provide a "clarification" question when an entry is too vague to log confidently (e.g. "did a workout" with no detail, "bench press with varying sizes of sets" without the reps/weights, or a weight with no exercise and no prior context). When prior-session context is given and the user says something like "another set with 90", reuse the most recent activity and category from that context and fill the new weight; that is NOT ambiguous.
-
-Example: "5 sets of deadlifts, 1.5h climbing, 5 sets of bench press with varying sizes of sets" should produce three entries: Deadlift strength with five sets if reps/weight were stated, Climbing sport with duration 1.5h, and Bench press strength marked ambiguous if the set breakdown is missing.`
-
-function buildUserMessage(text, ctx) {
-  if (!ctx || !ctx.entries || ctx.entries.length === 0) {
-    return `Local date: ${localDate()}\n\nEntry: ${text}`
-  }
-  // Hand the model the last few entries of the open session so relative
-  // references resolve. Keep it terse — activity, category, last set.
-  const recent = ctx.entries.slice(-4).map((e) => {
-    const summary = summarizeMetrics(e) || '(no metrics)'
-    return `- ${e.activity} [${e.category}]: ${summary}`
-  }).join('\n')
-  return `Local date: ${localDate()}\n\nCurrent open session (most recent last):\n${recent}\n\nEntry: ${text}`
-}
-
-function buildClarificationUserMessage(text, target) {
-  const entry = target?.entry
-  const current = entry
-    ? JSON.stringify({
-        category: entry.category,
-        activity: entry.activity,
-        metrics: entry.metrics,
-      }, null, 2)
-    : '{}'
-  return `Local date: ${localDate()}
-
-Update this existing logged entry using the user's answer. Keep fields that the answer does not change. Return exactly one entry in the usual JSON shape.
-
-Existing stored entry:
-${current}
-
-Clarification question:
-${target?.question || ''}
-
-User answer:
-${text}`
+async function updateAppChatPrompt(chatId, token, systemPrompt) {
+  if (!chatId) return
+  const r = await fetch(`/api/app-chats/${encodeURIComponent(chatId)}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ system_prompt: systemPrompt }),
+  })
+  if (!r.ok) throw new Error(`update chat prompt -> ${r.status}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -954,7 +931,7 @@ const S = {
   root: {
     height: '100%', display: 'flex', flexDirection: 'column',
     background: 'var(--bg)', color: 'var(--text)', fontFamily: 'var(--font)',
-    maxWidth: '100%', overflowX: 'hidden',
+    maxWidth: '100%', overflow: 'hidden',
   },
   // Web cap so the column doesn't sprawl on desktop while staying mobile-first.
   inner: {
@@ -971,15 +948,16 @@ const S = {
 
   scroll: {
     flex: 1, overflowY: 'auto', overflowX: 'hidden',
-    padding: '14px 16px 210px',
+    padding: '14px 16px 16px',
     wordBreak: 'break-word', overflowWrap: 'anywhere',
+    minHeight: 0,
   },
 
   tabbar: {
-    position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 20,
+    flexShrink: 0,
     display: 'flex', background: 'color-mix(in srgb, var(--surface) 94%, #000)',
-    borderTop: '1px solid var(--border)',
-    padding: '6px 10px env(safe-area-inset-bottom, 0px)', flexShrink: 0,
+    borderBottom: '1px solid var(--border)',
+    padding: '6px 10px',
     gap: '6px',
   },
   tabBtn: (active) => ({
@@ -993,65 +971,54 @@ const S = {
   }),
   tabIcon: { display: 'flex', lineHeight: 1 },
 
-  // Sticky NL composer, styled like the Möbius chat composer: a pill input
-  // pinned just above the tab bar with a round send button. `bottom` clears the
-  // tab bar (≈70px tall) + its safe-area inset so the two never overlap; the
-  // tab bar carries a higher z-index as belt-and-braces.
-  composerWrap: {
-    position: 'absolute', left: 0, right: 0, zIndex: 10,
-    bottom: 'calc(74px + env(safe-area-inset-bottom, 0px))',
-    background: 'linear-gradient(to top, var(--bg) 78%, transparent)',
-    padding: '12px 16px',
-    pointerEvents: 'none',
-  },
-  composerInner: {
-    width: '100%', maxWidth: '720px', margin: '0 auto', pointerEvents: 'auto',
-  },
-  composer: {
-    display: 'flex', alignItems: 'center', gap: '10px',
-    background: 'color-mix(in srgb, var(--surface) 92%, #111827)',
-    border: '1px solid color-mix(in srgb, var(--border) 80%, var(--accent))',
-    borderRadius: '22px', padding: '7px 7px 7px 16px',
-    boxShadow: '0 12px 34px rgba(0,0,0,0.28)',
-  },
-  composerInput: {
-    flex: 1, border: 'none', outline: 'none', resize: 'none',
-    background: 'transparent', color: 'var(--text)',
-    fontFamily: 'var(--font)', fontSize: '15px', lineHeight: 1.4,
-    maxHeight: '120px', padding: '8px 0',
-  },
-  sendBtn: (enabled) => ({
-    width: '58px', height: '46px', borderRadius: '16px', flexShrink: 0,
-    border: 'none', cursor: enabled ? 'pointer' : 'default',
-    background: enabled ? 'var(--accent)' : 'color-mix(in srgb, var(--border) 70%, #000)',
-    color: '#fff', fontSize: '18px', fontWeight: 700,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontFamily: 'var(--font)', transition: 'background 0.15s',
-  }),
-  composerHint: {
-    fontSize: '11px', color: 'var(--muted)', textAlign: 'center',
-    margin: '8px 0 0',
-  },
   chatPanel: {
-    display: 'flex', flexDirection: 'column', gap: '8px',
-    marginBottom: '16px',
+    flex: '0 0 38%',
+    minHeight: '240px',
+    maxHeight: '56%',
+    display: 'flex',
+    flexDirection: 'column',
+    background: 'var(--surface)',
+    borderTop: '1px solid var(--border)',
   },
-  chatRow: (role) => ({
-    display: 'flex', justifyContent: role === 'user' ? 'flex-end' : 'flex-start',
-  }),
-  chatBubble: (role) => ({
-    maxWidth: '86%', borderRadius: '8px', padding: '10px 12px',
-    fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap',
-    background: role === 'user'
-      ? 'color-mix(in srgb, var(--accent) 22%, var(--surface))'
-      : 'var(--surface)',
+  chatHead: {
+    flex: '0 0 auto',
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '10px',
+    minHeight: '34px',
+    padding: '7px 12px',
+    borderBottom: '1px solid var(--border)',
+    background: 'var(--surface)',
+  },
+  chatHeadTitle: {
+    fontSize: '11px',
+    lineHeight: 1,
+    color: 'var(--muted)',
+    fontWeight: 800,
+    letterSpacing: 0,
+  },
+  chatHeadHint: {
+    fontSize: '12px',
+    color: 'var(--muted)',
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    textOverflow: 'ellipsis',
+  },
+  chatEmbed: {
+    flex: '1 1 auto',
+    minHeight: 0,
+    overflow: 'hidden',
+    background: 'var(--bg)',
+  },
+  chatError: {
+    flex: '0 0 auto',
+    margin: '8px 14px 0',
+    padding: '8px 10px',
     border: '1px solid var(--border)',
+    borderRadius: '8px',
+    background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
     color: 'var(--text)',
-  }),
-  chatMeta: {
-    display: 'block', marginBottom: '3px',
-    fontSize: '10px', color: 'var(--muted)', fontWeight: 800,
-    textTransform: 'uppercase', letterSpacing: '0.4px',
+    fontSize: '12px',
   },
 
   card: {
@@ -1191,31 +1158,6 @@ const S = {
     whiteSpace: 'nowrap',
   }),
 
-  banner: {
-    borderRadius: '12px', padding: '12px 14px', marginBottom: '14px',
-    fontSize: '13px', lineHeight: 1.5,
-    background: 'var(--surface)', border: '1px solid var(--accent)',
-    color: 'var(--text)',
-  },
-  inlineBanner: (kind) => ({
-    display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px',
-    borderRadius: '12px', padding: '10px 12px', marginTop: '10px',
-    fontSize: '12px', lineHeight: 1.45,
-    background: kind === 'success'
-      ? 'color-mix(in srgb, var(--accent) 15%, transparent)'
-      : 'color-mix(in srgb, var(--danger, #ef4444) 14%, transparent)',
-    border: `1px solid ${kind === 'success' ? 'var(--accent)' : 'var(--danger, #ef4444)'}`,
-    color: 'var(--text)',
-  }),
-  bannerClose: {
-    border: 'none', background: 'transparent', color: 'var(--muted)',
-    cursor: 'pointer', fontSize: '18px', lineHeight: 1, padding: 0,
-  },
-  spinner: {
-    width: '18px', height: '18px', borderRadius: '50%',
-    border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff',
-    animation: 'mobiusGymSpin 0.7s linear infinite',
-  },
   barList: { display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' },
   barRow: { display: 'grid', gridTemplateColumns: '88px 1fr 48px', gap: '10px', alignItems: 'center' },
   barLabel: { fontSize: '12px', color: 'var(--muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' },
@@ -1568,62 +1510,6 @@ function ConfirmCard({
 }
 
 // ---------------------------------------------------------------------------
-// NL composer — sticky, chat-composer styled. Enter sends (Shift+Enter
-// newlines); the round button sends too. Disabled while a parse is in flight.
-// ---------------------------------------------------------------------------
-
-function Composer({ value, onChange, onSend, busy, online, error, onDismissError, success }) {
-  const taRef = useRef(null)
-  // Auto-grow the textarea up to its max-height.
-  useEffect(() => {
-    const el = taRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 120)}px`
-  }, [value])
-
-  const enabled = value.trim().length > 0 && !busy
-  const onKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      if (enabled) onSend()
-    }
-  }
-
-  return (
-    <div style={S.composerWrap}>
-      <div style={S.composerInner}>
-        <div style={S.composer}>
-          <textarea
-            ref={taRef} style={S.composerInput} value={value} rows={1}
-            onChange={(e) => onChange(e.target.value)} onKeyDown={onKeyDown}
-            placeholder={online ? 'Log an activity… ran 5k in 24 min' : 'Offline — type to log manually'}
-            aria-label="Describe your activity" disabled={busy}
-          />
-          <button
-            style={S.sendBtn(enabled)} onClick={() => enabled && onSend()}
-            disabled={!enabled} aria-label="Log activity"
-          >
-            {busy ? <span style={S.spinner} /> : 'Log'}
-          </button>
-        </div>
-        {error && (
-          <div style={S.inlineBanner('error')} role="status" aria-live="polite">
-            <span>{error}</span>
-            <button style={S.bannerClose} onClick={onDismissError} aria-label="Dismiss parse error">×</button>
-          </div>
-        )}
-        {success && (
-          <div style={S.inlineBanner('success')} role="status" aria-live="polite">
-            <span>{success}</span>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Entry feed — entries grouped into derived sessions, newest first.
 // ---------------------------------------------------------------------------
 
@@ -1689,26 +1575,96 @@ function groupEntriesByDate(entries) {
     .map(([date, rows]) => ({ date, entries: rows }))
 }
 
-function ChatPanel({ messages, parsing }) {
+function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged }) {
+  const mountRef = useRef(null)
+  const [chatId, setChatId] = useState(null)
+  const [error, setError] = useState(null)
+  const onEntriesRef = useRef(onEntriesMaybeChanged)
+  useEffect(() => { onEntriesRef.current = onEntriesMaybeChanged }, [onEntriesMaybeChanged])
+  const systemPrompt = useMemo(() => workoutAgentPrompt(appId), [appId])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const saved = await store.get('chat_id.json')
+        if (cancelled) return
+        if (saved && saved.id) {
+          const id = String(saved.id)
+          updateAppChatPrompt(id, token, systemPrompt).catch(() => {})
+          setChatId(id)
+          return
+        }
+      } catch {
+        // Fall through to creating a fresh chat.
+      }
+      try {
+        const id = await createAppChat(appId, token, systemPrompt)
+        if (cancelled) return
+        setChatId(id)
+        store.set('chat_id.json', { id }).catch(() => {})
+      } catch (e) {
+        if (!cancelled) setError(e.message || 'Could not start the workout agent chat.')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [appId, store, systemPrompt, token])
+
+  useEffect(() => {
+    const mount = mountRef.current
+    if (!chatId) return undefined
+    if (!mount || !window.mobius || typeof window.mobius.chat !== 'function') {
+      setError('Embedded chat is not available in this shell.')
+      return undefined
+    }
+    let disposed = false
+    let handle = null
+    setError(null)
+
+    window.mobius.chat({
+      mount,
+      chatId,
+      title: 'Workout',
+      systemPrompt,
+    }).then((nextHandle) => {
+      if (disposed) {
+        nextHandle.destroy()
+        return
+      }
+      handle = nextHandle
+      handle
+        .on('ready', ({ chatId: resolved }) => {
+          if (!resolved) return
+          const next = String(resolved)
+          if (next !== chatId) {
+            setChatId(next)
+            store.set('chat_id.json', { id: next }).catch(() => {})
+          }
+        })
+        .on('turn-done', () => { if (onEntriesRef.current) onEntriesRef.current() })
+        .on('error', ({ error: chatError }) => {
+          setError(chatError || 'Embedded chat reported an error.')
+        })
+    }).catch((e) => {
+      if (!disposed) setError(e.message || 'Could not mount embedded chat.')
+    })
+
+    return () => {
+      disposed = true
+      if (handle) handle.destroy()
+    }
+  }, [chatId, store, systemPrompt])
+
   return (
-    <div style={S.chatPanel} aria-live="polite">
-      {messages.map((message) => (
-        <div key={message.id} style={S.chatRow(message.role)}>
-          <div style={S.chatBubble(message.role)}>
-            <span style={S.chatMeta}>{message.role === 'user' ? 'You' : 'Agent'}</span>
-            {message.text}
-          </div>
-        </div>
-      ))}
-      {parsing && (
-        <div style={S.chatRow('assistant')}>
-          <div style={S.chatBubble('assistant')}>
-            <span style={S.chatMeta}>Agent</span>
-            Reading that…
-          </div>
-        </div>
-      )}
-    </div>
+    <section style={S.chatPanel}>
+      <div style={S.chatHead}>
+        <span style={S.chatHeadTitle}>Agent</span>
+        <span style={S.chatHeadHint}>Tell it what you trained — it edits the log</span>
+      </div>
+      {error && <div style={S.chatError}>{error}</div>}
+      <style>{'.workout-chat-embed iframe{display:block;width:100%;height:100%;border:0}'}</style>
+      <div className="workout-chat-embed" style={S.chatEmbed} ref={mountRef} />
+    </section>
   )
 }
 
@@ -2119,64 +2075,48 @@ export default function App({ appId, token }) {
   const [bootStatus, setBootStatus] = useState('loading')
   const syncStatus = useSyncStatus(store)
   const saveQueueRef = useRef({ inFlight: false, pending: null })
-  const successTimerRef = useRef(null)
 
-  // Composer + parse state.
-  const [input, setInput] = useState('')
-  const [parsing, setParsing] = useState(false)
-  const [parseError, setParseError] = useState('')
-  const [successFlash, setSuccessFlash] = useState('')
-  const [chatMessages, setChatMessages] = useState(() => [{
-    id: uid(),
-    role: 'assistant',
-    text: 'Tell me what you did and I will keep the log updated.',
-  }])
   const [editingEntry, setEditingEntry] = useState(null)
-  const [clarificationTarget, setClarificationTarget] = useState(null)
   const [deletePending, setDeletePending] = useState(null) // entry id awaiting confirm
   const navHandleRef = useRef(null)
+
+  const bumpSync = syncStatus.bump
+
+  const loadEntries = useCallback(async (options = {}) => {
+    const loaded = await store.get('entries.json')
+    const normalizedLoaded = normalizeStoredEntries(loaded)
+    if (normalizedLoaded.length > 0) {
+      setEntries(normalizedLoaded)
+      if (options.setReady) setBootStatus('ready')
+      if (Array.isArray(loaded) && JSON.stringify(loaded) !== JSON.stringify(normalizedLoaded)) {
+        store.set('entries.json', normalizedLoaded).then((r) => bumpSync(r))
+      }
+      return normalizedLoaded
+    }
+    if (options.allowMigration) {
+      const legacy = await store.get('state.json')
+      if (legacy && Array.isArray(legacy.history) && legacy.history.length > 0) {
+        const migrated = normalizeStoredEntries(migrateLegacyState(legacy))
+        setEntries(migrated)
+        if (options.setReady) setBootStatus('ready')
+        store.set('entries.json', migrated).then((r) => bumpSync(r))
+        return migrated
+      }
+    }
+    setEntries([])
+    if (options.setReady) setBootStatus('ready')
+    return []
+  }, [bumpSync, store])
 
   // Initial load. entries.json is the append-only log. If it's missing but a
   // legacy state.json exists, migrate its logged history to strength entries.
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      const loaded = await store.get('entries.json')
+    loadEntries({ allowMigration: true, setReady: true }).then(() => {
       if (cancelled) return
-      const normalizedLoaded = normalizeStoredEntries(loaded)
-      if (normalizedLoaded.length > 0) {
-        setEntries(normalizedLoaded)
-        setBootStatus('ready')
-        if (Array.isArray(loaded) && JSON.stringify(loaded) !== JSON.stringify(normalizedLoaded)) {
-          store.set('entries.json', normalizedLoaded).then((r) => syncStatus.bump(r))
-        }
-        return
-      }
-      // No usable entries yet — try migrating an old gym state.json. This also
-      // covers an empty entries.json created before migration finished.
-      const legacy = await store.get('state.json')
-      if (cancelled) return
-      if (legacy && Array.isArray(legacy.history) && legacy.history.length > 0) {
-        const migrated = normalizeStoredEntries(migrateLegacyState(legacy))
-        setEntries(migrated)
-        setBootStatus('ready')
-        // Persist the migration so we don't re-run it next boot.
-        store.set('entries.json', migrated).then((r) => syncStatus.bump(r))
-        return
-      }
-      // No entries and no legacy state. Start empty. Offline-first-boot is
-      // the same path: the user logs into an empty list and the writes
-      // reconcile when the runtime reconnects — there's nothing to migrate
-      // and no seed to wait on, so there's no first-boot-offline dead end.
-      setEntries([])
-      setBootStatus('ready')
-    })()
+    })
     return () => { cancelled = true }
-    // syncStatus.bump is stable; intentionally excluded to avoid re-running load.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store])
-
-  const bumpSync = syncStatus.bump
+  }, [loadEntries])
   const flushSaves = useCallback(async () => {
     const q = saveQueueRef.current
     if (q.inFlight) return
@@ -2215,36 +2155,6 @@ export default function App({ appId, token }) {
     flushSaves()
   }, [flushSaves])
 
-  const appendChat = useCallback((role, text) => {
-    setChatMessages((prev) => [...prev, { id: uid(), role, text }])
-  }, [])
-
-  const describeLoggedEntries = (logged, questions = []) => {
-    const names = logged.map((entry) => `${entry.activity}${summarizeMetrics(entry) ? ` (${summarizeMetrics(entry)})` : ''}`)
-    const loggedLine = names.length > 0
-      ? `Logged ${names.join(', ')}.`
-      : 'I could not confidently add anything yet.'
-    if (questions.length === 0) return loggedLine
-    return `${loggedLine}\n\n${questions[0]}`
-  }
-
-  const entriesFromDrafts = useCallback((drafts, raw, baseEntries = entries || []) => {
-    const baseTs = Date.now()
-    const next = []
-    for (const [index, item] of drafts.entries()) {
-      const ts = baseTs + index * 1000
-      const sessionId = assignSession([...baseEntries, ...next], ts)
-      next.push(normalizeEntry(item.draft, {
-        ts,
-        sessionId,
-        raw,
-        source: item.source || 'ai',
-        confirmed: !item.ambiguous,
-      }))
-    }
-    return next
-  }, [entries])
-
   const commitEditedEntry = useCallback((edited, ts) => {
     if (!editingEntry) return
     const sessionId = editingEntry.sessionId || assignSession(
@@ -2262,115 +2172,11 @@ export default function App({ appId, token }) {
     persist((entries || []).map((row) => (row.id === editingEntry.id ? entry : row)))
     setEditingEntry(null)
     setTab('log')
-    appendChat('assistant', `Updated ${entry.activity}.`)
-    setSuccessFlash('Updated.')
-    if (successTimerRef.current) clearTimeout(successTimerRef.current)
-    successTimerRef.current = setTimeout(() => {
-      setSuccessFlash('')
-      successTimerRef.current = null
-    }, 1400)
-  }, [appendChat, editingEntry, entries, persist])
+  }, [editingEntry, entries, persist])
 
   const deleteEntry = useCallback((id) => {
     persist((entries || []).filter((e) => e.id !== id), { deletedIds: [id] })
   }, [entries, persist])
-
-  // Send chat text to /api/ai, parse JSON, and let the agent update the log.
-  const handleSend = useCallback(async () => {
-    const text = input.trim()
-    if (!text) return
-    setParseError('')
-    setSuccessFlash('')
-    appendChat('user', text)
-
-    // Offline → create a best-effort note entry and leave it editable.
-    if (!navigator.onLine) {
-      const ts = Date.now()
-      const entry = normalizeEntry({
-        category: 'other',
-        activity: 'Activity',
-        metrics: { note: text },
-      }, {
-        ts,
-        sessionId: assignSession(entries || [], ts),
-        raw: text,
-        source: 'manual',
-        confirmed: false,
-      })
-      persist([...(entries || []), entry])
-      appendChat('assistant', `I saved that as an editable note for now: ${entry.activity}.`)
-      setInput('')
-      return
-    }
-
-    setParsing(true)
-    const ctx = currentSession(entries || [])
-    try {
-      const activeClarification = clarificationTarget
-        ? {
-            ...clarificationTarget,
-            entry: (entries || []).find((entry) => entry.id === clarificationTarget.entryId),
-          }
-        : null
-      let full = ''
-      for await (const ev of streamAi(
-        [{
-          role: 'user',
-          content: activeClarification
-            ? buildClarificationUserMessage(text, activeClarification)
-            : buildUserMessage(text, ctx),
-        }],
-        AI_SYSTEM, token,
-      )) {
-        if (ev.type === 'text') full += ev.content
-        else if (ev.type === 'error') throw new Error(ev.message || 'AI error')
-      }
-      const parsed = extractFirstJsonObject(full)
-      if (!parsed) throw new Error('no-json')
-      const drafts = draftsFromParsedPayload(parsed).map((item) => ({
-        ...item,
-        raw: text,
-        source: 'ai',
-      }))
-      if (drafts.length === 0) throw new Error('empty-drafts')
-      if (activeClarification?.entry) {
-        const revised = normalizeEntry(drafts[0].draft, {
-          id: activeClarification.entry.id,
-          ts: activeClarification.entry.ts,
-          sessionId: activeClarification.entry.sessionId,
-          raw: activeClarification.entry.raw || text,
-          source: activeClarification.entry.source || 'ai',
-          confirmed: !drafts[0].ambiguous,
-        })
-        persist((entries || []).map((entry) => (entry.id === revised.id ? revised : entry)))
-        setClarificationTarget(null)
-        appendChat('assistant', describeLoggedEntries([revised], drafts[0].ambiguous && drafts[0].clarification ? [drafts[0].clarification] : []))
-        if (drafts[0].ambiguous && drafts[0].clarification) {
-          setClarificationTarget({ entryId: revised.id, question: drafts[0].clarification })
-        }
-      } else {
-        const logged = entriesFromDrafts(drafts, text)
-        persist([...(entries || []), ...logged])
-        const questions = drafts
-          .map((draft, index) => (draft.ambiguous && draft.clarification ? { index, text: draft.clarification } : null))
-          .filter(Boolean)
-        appendChat('assistant', describeLoggedEntries(logged, questions.map((q) => q.text)))
-        if (questions.length > 0 && logged[questions[0].index]) {
-          setClarificationTarget({ entryId: logged[questions[0].index].id, question: questions[0].text })
-        }
-      }
-      setInput('')
-    } catch {
-      appendChat('assistant', 'I could not parse that cleanly. Try saying it another way, or add the entry and edit it from the log.')
-      setParseError('I could not parse that. Your text is still here; edit it or try again.')
-    } finally {
-      setParsing(false)
-    }
-  }, [appendChat, clarificationTarget, entries, entriesFromDrafts, input, persist, token])
-
-  useEffect(() => () => {
-    if (successTimerRef.current) clearTimeout(successTimerRef.current)
-  }, [])
 
   const closeNestedNav = useCallback(() => {
     try { navHandleRef.current?.close?.() } catch {}
@@ -2433,11 +2239,25 @@ export default function App({ appId, token }) {
         <SyncPill status={syncStatus} />
       </div>
 
+      {!editingEntry && (
+        <nav style={S.tabbar} role="tablist" aria-label="Activity tabs">
+          <button style={S.tabBtn(tab === 'log')} onClick={() => setTab('log')}
+            role="tab" aria-selected={tab === 'log'} aria-label="Log">
+            <span style={S.tabIcon} aria-hidden>✎</span>Log
+          </button>
+          <button style={S.tabBtn(tab === 'insights')} onClick={() => setTab('insights')}
+            role="tab" aria-selected={tab === 'insights'} aria-label="Insights">
+            <span style={S.tabIcon} aria-hidden>▦</span>Insights
+          </button>
+          <button style={S.tabBtn(tab === 'all')} onClick={() => setTab('all')}
+            role="tab" aria-selected={tab === 'all'} aria-label="All entries">
+            <span style={S.tabIcon} aria-hidden>≣</span>All
+          </button>
+        </nav>
+      )}
+
       <div style={S.scroll}>
         <div style={S.inner}>
-          {tab === 'log' && (
-            <ChatPanel messages={chatMessages} parsing={parsing} />
-          )}
           {editingEntry ? (
             <ConfirmCard
               draft={draftFromStoredEntry(editingEntry)}
@@ -2476,30 +2296,13 @@ export default function App({ appId, token }) {
         </div>
       </div>
 
-      {tab === 'log' && !editingEntry && (
-        <Composer
-          value={input} onChange={setInput} onSend={handleSend}
-          busy={parsing} online={syncStatus.online}
-          error={parseError} onDismissError={() => setParseError('')}
-          success={successFlash}
-        />
-      )}
-
       {!editingEntry && (
-        <nav style={S.tabbar} role="tablist" aria-label="Activity tabs">
-          <button style={S.tabBtn(tab === 'log')} onClick={() => setTab('log')}
-            role="tab" aria-selected={tab === 'log'} aria-label="Log">
-            <span style={S.tabIcon} aria-hidden>✎</span>Log
-          </button>
-          <button style={S.tabBtn(tab === 'insights')} onClick={() => setTab('insights')}
-            role="tab" aria-selected={tab === 'insights'} aria-label="Insights">
-            <span style={S.tabIcon} aria-hidden>▦</span>Insights
-          </button>
-          <button style={S.tabBtn(tab === 'all')} onClick={() => setTab('all')}
-            role="tab" aria-selected={tab === 'all'} aria-label="All entries">
-            <span style={S.tabIcon} aria-hidden>≣</span>All
-          </button>
-        </nav>
+        <AgentChatPanel
+          appId={appId}
+          token={token}
+          store={store}
+          onEntriesMaybeChanged={() => loadEntries({ allowMigration: false })}
+        />
       )}
 
       {deletePending && (

@@ -106,7 +106,7 @@ export function uid() {
 // wrapped in prose or ```json fences. A greedy /\{[\s\S]*\}/ breaks when the
 // model adds a trailing brace or commentary after the object; this scans each
 // '{' for a string-aware balanced match and returns the first that JSON.parses
-// (or null). Used to read the model's reply in handleSend.
+// (or null). Kept for tests and legacy parsed payload migration.
 export function extractFirstJsonObject(text) {
   if (typeof text !== 'string') return null
   for (let i = text.indexOf('{'); i >= 0; i = text.indexOf('{', i + 1)) {
@@ -131,14 +131,13 @@ export function extractFirstJsonObject(text) {
 }
 
 // ---------------------------------------------------------------------------
-// parseEntry → normalizeEntry. The LLM returns a loose, display-unit JSON
-// blob; normalizeEntry turns it into the canonical stored Entry shape with SI
-// units, a clamped category, and a stable id+ts. This is the single mapping
-// the confirm card edits and `commitEntry` appends — keeping it pure means a
-// test can feed a hand-written "parsed" object (standing in for the LLM) and
-// assert the stored entry exactly.
+// parseEntry → normalizeEntry. Older/custom parsers returned a loose,
+// display-unit JSON blob; normalizeEntry turns that into the canonical stored
+// Entry shape with SI units, a clamped category, and a stable id+ts. Keeping
+// it pure means tests can feed a hand-written "parsed" object and assert the
+// stored entry exactly.
 //
-// parsed shape (from /api/ai):
+// parsed shape:
 //   { category, activity, icon?, metrics, ambiguous?, clarification? }
 // or for multi-activity input:
 //   { entries: [{ category, activity, metrics, ambiguous?, clarification? }],

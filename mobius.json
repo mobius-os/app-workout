@@ -1,8 +1,8 @@
 {
   "id": "gym",
   "name": "Workout",
-  "version": "2.2.2",
-  "description": "Chat-first training log. Tell the agent what you did — \"three sets of deadlifts and one hour climbing\" — and it updates a structured, editable workout log with n/a fields when details are unknown. Includes strength PRs (e1RM), cardio bests, weekly category volume, per-category stats, and a year-at-a-glance streak heatmap.",
+  "version": "2.2.3",
+  "description": "Embedded-agent training log. Tell the Workout agent what you did — \"three sets of deadlifts and one hour climbing\" — and it maintains entries.json while the structured, editable log refreshes after each turn. Includes strength PRs (e1RM), cardio bests, weekly category volume, per-category stats, and a year-at-a-glance streak heatmap.",
   "author": "mobius-os",
   "license": "MIT",
   "homepage": "https://github.com/mobius-os/app-workout",
