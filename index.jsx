@@ -603,6 +603,8 @@ function exerciseList(entries) {
         lastTs: 0,
         best: '',
         bestScore: 0,
+        topWeight: 0,
+        topUnit: 'kg',
       }
       byKey.set(key, row)
     }
@@ -612,6 +614,8 @@ function exerciseList(entries) {
     if (sid) row.sessionIds.add(sid)
     if (row.family === 'strength') {
       for (const set of e.metrics?.sets || []) {
+        const w = Number(set.weight_kg) || 0
+        if (w > row.topWeight) { row.topWeight = w; row.topUnit = set.unit === 'lb' ? 'lb' : 'kg' }
         const score = epley1RM(set.weight_kg, set.reps)
         if (score > row.bestScore) {
           row.bestScore = score
@@ -645,7 +649,10 @@ function exerciseList(entries) {
       entries: row.entries,
       sessions: row.sessionIds.size,
       lastTs: row.lastTs,
-      best: row.best || '—',
+      // Fall back to the heaviest weight when no set had reps to score an e1RM,
+      // so a weight-but-no-reps lift reads "100kg" not "—" (matches the per-set
+      // summary the feed already shows for the same data).
+      best: row.best || (row.topWeight > 0 ? `${fromKg(row.topWeight, row.topUnit)}${row.topUnit}` : '—'),
     }))
     .sort((a, b) => (b.entries - a.entries) || (b.lastTs - a.lastTs))
 }
@@ -661,8 +668,10 @@ function exerciseSessionPoint(session, family) {
       for (const set of e.metrics?.sets || []) {
         const w = Number(set.weight_kg) || 0
         const r = Number(set.reps) || 0
-        if (set.unit === 'lb') unit = 'lb'
-        if (w > topWeight) topWeight = w
+        // Display unit follows the HEAVIEST set, not any-lb-wins: topWeight_kg is
+        // that set's SI weight, so unit must be its unit or the UI renders a kg PR
+        // in lb (100kg top shown as 220.5lb when a lighter lb warmup exists).
+        if (w > topWeight) { topWeight = w; unit = set.unit === 'lb' ? 'lb' : 'kg' }
         const er = epley1RM(set.weight_kg, set.reps)
         if (er > bestE1rm) bestE1rm = er
         if (w > 0 && r > 0) { volume += w * r; reps += r; sets += 1 }
@@ -696,8 +705,10 @@ function exerciseRecords(mine, points, family) {
       for (const set of e.metrics?.sets || []) {
         const w = Number(set.weight_kg) || 0
         const r = Number(set.reps) || 0
-        if (set.unit === 'lb') unit = 'lb'
-        if (w > heaviest) { heaviest = w; heaviestDate = e.localDate }
+        // Lifetime display unit follows the heaviest set (same reason as
+        // exerciseSessionPoint) — not any-lb-wins, which would label every PR
+        // tile in lb forever after a single off-unit warmup.
+        if (w > heaviest) { heaviest = w; heaviestDate = e.localDate; unit = set.unit === 'lb' ? 'lb' : 'kg' }
         const er = epley1RM(set.weight_kg, set.reps)
         if (er > bestE1rm) { bestE1rm = er; e1rmDate = e.localDate }
         if (w > 0 && r > 0 && w * r > bestSetVolume) bestSetVolume = w * r
@@ -2400,21 +2411,26 @@ function Sparkline({ points, color, label }) {
 function detailTrend(detail) {
   const { family, points, records } = detail
   if (points.length === 0) return null
+  // A trend is only meaningful if some point has a positive value. Without this,
+  // an exercise whose sets all lack reps (e1RM=0) — or a note-only "other" log —
+  // would draw a flat line pinned at "0kg/0m" and read as real data.
+  const signal = (series) => series.some((p) => (Number(p.value) || 0) > 0)
   if (family === 'strength') {
     const unit = records.unit || 'kg'
-    return {
-      label: 'Estimated 1RM',
-      series: points.map((p) => ({ ts: p.ts, value: p.e1rm })),
-      fmt: (v) => fmtWeight(Math.round(v * 10) / 10, unit),
-    }
+    const series = points.map((p) => ({ ts: p.ts, value: p.e1rm }))
+    return signal(series)
+      ? { label: 'Estimated 1RM', series, fmt: (v) => fmtWeight(Math.round(v * 10) / 10, unit) }
+      : null
   }
   if (family === 'cardio') {
     const hasDist = points.some((p) => (p.distance_m || 0) > 0)
-    return hasDist
-      ? { label: 'Distance', series: points.map((p) => ({ ts: p.ts, value: p.distance_m })), fmt: (v) => fmtDistance(v) }
-      : { label: 'Duration', series: points.map((p) => ({ ts: p.ts, value: p.duration_s })), fmt: (v) => fmtDuration(v) }
+    const series = points.map((p) => ({ ts: p.ts, value: hasDist ? p.distance_m : p.duration_s }))
+    return signal(series)
+      ? { label: hasDist ? 'Distance' : 'Duration', series, fmt: (v) => (hasDist ? fmtDistance(v) : fmtDuration(v)) }
+      : null
   }
-  return { label: 'Duration', series: points.map((p) => ({ ts: p.ts, value: p.duration_s })), fmt: (v) => fmtDuration(v) }
+  const series = points.map((p) => ({ ts: p.ts, value: p.duration_s }))
+  return signal(series) ? { label: 'Duration', series, fmt: (v) => fmtDuration(v) } : null
 }
 
 // Headline record tiles per family, mirroring Hevy's exercise summary.

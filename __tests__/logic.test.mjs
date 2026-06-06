@@ -546,3 +546,28 @@ test('exerciseDetail summarizes cardio distance/pace and returns null when absen
   assert.equal(d.records.totalDistance_m, 15000)
   assert.equal(exerciseDetail(FIXTURE, 'strength', 'Nonexistent'), null)
 })
+
+test('exerciseDetail display unit follows the heaviest set, not an off-unit warmup', () => {
+  // 100 kg top set plus a light 30 lb (13.6 kg) warmup in the same session.
+  // The display unit must track the heaviest set (kg), or the UI shows 100kg as 220.5lb.
+  const entries = [{
+    id: 'mix', ts: base, localDate: localDate(new Date(base)), sessionId: 'sMix',
+    category: 'strength', activity: 'Deadlift', icon: 'barbell',
+    metrics: { sets: [
+      { weight_kg: 100, reps: 5, unit: 'kg' },
+      { weight_kg: 13.6, reps: 15, unit: 'lb' },
+    ] },
+    source: 'ai', confirmed: true,
+  }]
+  const d = exerciseDetail(entries, 'strength', 'Deadlift')
+  assert.equal(d.points[0].topWeight_kg, 100)
+  assert.equal(d.points[0].unit, 'kg')
+  assert.equal(d.records.unit, 'kg')
+  assert.equal(d.records.heaviest_kg, 100)
+})
+
+test('exerciseList shows the heaviest weight when a set has no reps (not a bare dash)', () => {
+  const entries = [strengthEntry('nr', base, 'sNR', 'Deadlift', [[100, null]])]
+  const row = exerciseList(entries).find((r) => r.activity === 'Deadlift')
+  assert.equal(row.best, '100kg')
+})

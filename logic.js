@@ -595,6 +595,8 @@ export function exerciseList(entries) {
         lastTs: 0,
         best: '',
         bestScore: 0,
+        topWeight: 0,
+        topUnit: 'kg',
       }
       byKey.set(key, row)
     }
@@ -604,6 +606,8 @@ export function exerciseList(entries) {
     if (sid) row.sessionIds.add(sid)
     if (row.family === 'strength') {
       for (const set of e.metrics?.sets || []) {
+        const w = Number(set.weight_kg) || 0
+        if (w > row.topWeight) { row.topWeight = w; row.topUnit = set.unit === 'lb' ? 'lb' : 'kg' }
         const score = epley1RM(set.weight_kg, set.reps)
         if (score > row.bestScore) {
           row.bestScore = score
@@ -637,7 +641,10 @@ export function exerciseList(entries) {
       entries: row.entries,
       sessions: row.sessionIds.size,
       lastTs: row.lastTs,
-      best: row.best || '—',
+      // Fall back to the heaviest weight when no set had reps to score an e1RM,
+      // so a weight-but-no-reps lift reads "100kg" not "—" (matches the per-set
+      // summary the feed already shows for the same data).
+      best: row.best || (row.topWeight > 0 ? `${fromKg(row.topWeight, row.topUnit)}${row.topUnit}` : '—'),
     }))
     .sort((a, b) => (b.entries - a.entries) || (b.lastTs - a.lastTs))
 }
@@ -653,8 +660,10 @@ function exerciseSessionPoint(session, family) {
       for (const set of e.metrics?.sets || []) {
         const w = Number(set.weight_kg) || 0
         const r = Number(set.reps) || 0
-        if (set.unit === 'lb') unit = 'lb'
-        if (w > topWeight) topWeight = w
+        // Display unit follows the HEAVIEST set, not any-lb-wins: topWeight_kg is
+        // that set's SI weight, so unit must be its unit or the UI renders a kg PR
+        // in lb (100kg top shown as 220.5lb when a lighter lb warmup exists).
+        if (w > topWeight) { topWeight = w; unit = set.unit === 'lb' ? 'lb' : 'kg' }
         const er = epley1RM(set.weight_kg, set.reps)
         if (er > bestE1rm) bestE1rm = er
         if (w > 0 && r > 0) { volume += w * r; reps += r; sets += 1 }
@@ -688,8 +697,10 @@ function exerciseRecords(mine, points, family) {
       for (const set of e.metrics?.sets || []) {
         const w = Number(set.weight_kg) || 0
         const r = Number(set.reps) || 0
-        if (set.unit === 'lb') unit = 'lb'
-        if (w > heaviest) { heaviest = w; heaviestDate = e.localDate }
+        // Lifetime display unit follows the heaviest set (same reason as
+        // exerciseSessionPoint) — not any-lb-wins, which would label every PR
+        // tile in lb forever after a single off-unit warmup.
+        if (w > heaviest) { heaviest = w; heaviestDate = e.localDate; unit = set.unit === 'lb' ? 'lb' : 'kg' }
         const er = epley1RM(set.weight_kg, set.reps)
         if (er > bestE1rm) { bestE1rm = er; e1rmDate = e.localDate }
         if (w > 0 && r > 0 && w * r > bestSetVolume) bestSetVolume = w * r
