@@ -1253,34 +1253,6 @@ function workoutAgentPrompt(appId) {
   ].join('\n')
 }
 
-async function createAppChat(appId, token, systemPrompt) {
-  const r = await fetch('/api/app-chats', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ title: 'Workout', system_prompt: systemPrompt }),
-  })
-  if (!r.ok) throw new Error(`create chat -> ${r.status}`)
-  const data = await r.json()
-  if (!data || !data.id) throw new Error('create chat returned no id')
-  return String(data.id)
-}
-
-async function updateAppChatPrompt(chatId, token, systemPrompt) {
-  if (!chatId) return
-  const r = await fetch(`/api/app-chats/${encodeURIComponent(chatId)}`, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ system_prompt: systemPrompt }),
-  })
-  if (!r.ok) throw new Error(`update chat prompt -> ${r.status}`)
-}
-
 // ---------------------------------------------------------------------------
 // Styles — every color/font is a CSS token painted by the Möbius shell, so the
 // app inherits future themes for free. Single object named `S`.
@@ -2066,42 +2038,13 @@ function groupEntriesByDate(entries) {
 
 function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height }) {
   const mountRef = useRef(null)
-  const [chatId, setChatId] = useState(null)
   const [error, setError] = useState(null)
   const onEntriesRef = useRef(onEntriesMaybeChanged)
   useEffect(() => { onEntriesRef.current = onEntriesMaybeChanged }, [onEntriesMaybeChanged])
   const systemPrompt = useMemo(() => workoutAgentPrompt(appId), [appId])
 
   useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const saved = await store.get('chat_id.json')
-        if (cancelled) return
-        if (saved && saved.id) {
-          const id = String(saved.id)
-          updateAppChatPrompt(id, token, systemPrompt).catch(() => {})
-          setChatId(id)
-          return
-        }
-      } catch {
-        // Fall through to creating a fresh chat.
-      }
-      try {
-        const id = await createAppChat(appId, token, systemPrompt)
-        if (cancelled) return
-        setChatId(id)
-        store.set('chat_id.json', { id }).catch(() => {})
-      } catch (e) {
-        if (!cancelled) setError(e.message || 'Could not start the workout agent chat.')
-      }
-    })()
-    return () => { cancelled = true }
-  }, [appId, store, systemPrompt, token])
-
-  useEffect(() => {
     const mount = mountRef.current
-    if (!chatId) return undefined
     if (!mount || !window.mobius || typeof window.mobius.chat !== 'function') {
       setError('Embedded chat is not available in this shell.')
       return undefined
@@ -2112,29 +2055,20 @@ function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height }) 
 
     window.mobius.chat({
       mount,
-      chatId,
+      persist: 'chat_id.json',
       title: 'Workout',
       systemPrompt,
-      picker: true,
+      picker: false,
+      onTurnDone: () => { onEntriesRef.current?.() },
+      onError: ({ error: chatError }) => {
+        setError(typeof chatError === 'string' ? chatError : 'Embedded chat reported an error.')
+      },
     }).then((nextHandle) => {
       if (disposed) {
         nextHandle.destroy()
         return
       }
       handle = nextHandle
-      handle
-        .on('ready', ({ chatId: resolved }) => {
-          if (!resolved) return
-          const next = String(resolved)
-          if (next !== chatId) {
-            setChatId(next)
-            store.set('chat_id.json', { id: next }).catch(() => {})
-          }
-        })
-        .on('turn-done', () => { if (onEntriesRef.current) onEntriesRef.current() })
-        .on('error', ({ error: chatError }) => {
-          setError(chatError || 'Embedded chat reported an error.')
-        })
     }).catch((e) => {
       if (!disposed) setError(e.message || 'Could not mount embedded chat.')
     })
@@ -2143,7 +2077,7 @@ function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height }) 
       disposed = true
       if (handle) handle.destroy()
     }
-  }, [chatId, store, systemPrompt])
+  }, [systemPrompt])
 
   return (
     <section className="workout-chat-panel" style={{ ...S.chatPanel, flex: `0 0 ${height}%` }}>
