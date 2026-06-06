@@ -2205,10 +2205,10 @@ function SessionDraftCard({ entry }) {
   )
 }
 
-function CurrentSessionPanel({ session, onFinish }) {
+function CurrentSessionPanel({ session, onFinish, finishing = false }) {
   const normalized = useMemo(() => normalizeCurrentSession(session), [session])
   const entries = normalized?.entries || []
-  const ready = currentSessionReady(normalized)
+  const ready = currentSessionReady(normalized) && !finishing
   const missing = entries.map(sessionEntryMissing).filter(Boolean)
   const started = normalized?.startedAt
     ? new Date(normalized.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
@@ -2916,6 +2916,14 @@ export default function App({ appId, token }) {
   const [bootStatus, setBootStatus] = useState('loading')
   const syncStatus = useSyncStatus(store)
   const saveQueueRef = useRef({ inFlight: false, pending: null })
+  // Re-entrancy guard for Finish session: the handler is async (awaits the
+  // current_session.json clear), so a fast double-tap would otherwise run
+  // entriesFromCurrentSession twice on the same draft — each call mints fresh
+  // uids, so both id-distinct copies survive the id-keyed merge and the
+  // session commits twice. The ref flips synchronously, blocking the second
+  // tap before React re-renders the disabled button.
+  const finishInFlightRef = useRef(false)
+  const [finishing, setFinishing] = useState(false)
   const bodyRef = useRef(null)
   const [chatHeight, setChatHeight] = useState(() => readChatHeight(appId))
 
@@ -3040,13 +3048,21 @@ export default function App({ appId, token }) {
   }, [entries, persist])
 
   const finishCurrentSession = useCallback(async () => {
+    if (finishInFlightRef.current) return
     const committed = entriesFromCurrentSession(currentSession)
     if (committed.length === 0) return
-    const nextEntries = mergeEntriesForSave([...(entries || []), ...committed], entries)
-    persist(nextEntries)
-    setCurrentSession(null)
-    const result = await store.set('current_session.json', null)
-    bumpSync(result)
+    finishInFlightRef.current = true
+    setFinishing(true)
+    try {
+      const nextEntries = mergeEntriesForSave([...(entries || []), ...committed], entries)
+      persist(nextEntries)
+      setCurrentSession(null)
+      const result = await store.set('current_session.json', null)
+      bumpSync(result)
+    } finally {
+      finishInFlightRef.current = false
+      setFinishing(false)
+    }
   }, [bumpSync, currentSession, entries, persist, store])
 
   const resizeChatBy = useCallback((deltaPct) => {
@@ -3195,6 +3211,7 @@ export default function App({ appId, token }) {
                     <CurrentSessionPanel
                       session={currentSession}
                       onFinish={finishCurrentSession}
+                      finishing={finishing}
                     />
                     <LogTab
                       entries={entries}
