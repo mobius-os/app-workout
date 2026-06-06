@@ -15,6 +15,7 @@ import {
   SESSION_GAP_MS, toKg, summarizeMetrics, extractFirstJsonObject, localDate,
   mergeEntriesForSave, draftsFromParsedPayload, normalizeCurrentSession,
   sessionEntryMissing, currentSessionReady, entriesFromCurrentSession,
+  exerciseKey, exerciseList, exerciseDetail, paceSecPerKm, fmtPace,
 } from '../logic.js'
 import { buildEntry } from '../build-entry.mjs'
 
@@ -454,4 +455,94 @@ test('index.jsx inlined logic block is in sync with logic.js', () => {
   const logicSource = readFileSync(join(here, '..', 'logic.js'), 'utf8')
   const rebuilt = buildEntry(indexSource, logicSource)
   assert.equal(rebuilt, indexSource, 'index.jsx logic block is stale — run `node build-entry.mjs`')
+})
+
+// --- per-exercise analytics (Hevy-style drill-down) ---
+
+const DAY = 86_400_000
+function strengthEntry(id, ts, sessionId, activity, sets) {
+  return {
+    id, ts, localDate: localDate(new Date(ts)), sessionId,
+    category: 'strength', activity, icon: 'barbell',
+    metrics: { sets: sets.map(([weight_kg, reps]) => ({ weight_kg, reps, unit: 'kg' })) },
+    source: 'ai', confirmed: true,
+  }
+}
+function cardioEntry(id, ts, sessionId, activity, distance_m, duration_s) {
+  return {
+    id, ts, localDate: localDate(new Date(ts)), sessionId,
+    category: 'running', activity, icon: 'run',
+    metrics: { duration_s, distance_m, elevation_m: null, location: null },
+    source: 'ai', confirmed: true,
+  }
+}
+
+// A fixture: deadlift across 3 sessions (the middle one has two deadlift
+// entries to exercise the in-session aggregation), plus an unrelated squat and
+// run so filtering by category+activity is proven.
+const base = 1_700_000_000_000
+const FIXTURE = [
+  strengthEntry('a', base, 'sA', 'Deadlift', [[100, 5]]),
+  strengthEntry('b1', base + DAY, 'sB', 'Deadlift', [[102.5, 5]]),
+  strengthEntry('b2', base + DAY + 1000, 'sB', 'Deadlift', [[105, 3]]),
+  strengthEntry('c', base + 2 * DAY, 'sC', 'Deadlift', [[107.5, 5]]),
+  strengthEntry('sq', base + 3 * DAY, 'sD', 'Squat', [[140, 5]]),
+  cardioEntry('r1', base + 4 * DAY, 'sE', 'Run', 5000, 1500),
+  cardioEntry('r2', base + 5 * DAY, 'sF', 'Run', 10000, 3000),
+]
+
+test('paceSecPerKm and fmtPace: needs both sides, formats min/km', () => {
+  assert.equal(paceSecPerKm(1500, 5000), 300)
+  assert.equal(paceSecPerKm(1500, 0), null)
+  assert.equal(paceSecPerKm(0, 5000), null)
+  assert.equal(fmtPace(1500, 5000), '5:00/km')
+  assert.equal(fmtPace(1500, 0), null)
+})
+
+test('exerciseKey separates same name across categories and trims', () => {
+  assert.equal(exerciseKey('strength', ' Deadlift '), 'strength::Deadlift')
+  assert.notEqual(exerciseKey('strength', 'Plank'), exerciseKey('yoga', 'Plank'))
+})
+
+test('exerciseList ranks by frequency and carries icon/best per exercise', () => {
+  const list = exerciseList(FIXTURE)
+  assert.equal(list.length, 3) // Deadlift, Run, Squat
+  const dead = list.find((r) => r.activity === 'Deadlift')
+  assert.equal(dead.entries, 4)
+  assert.equal(dead.sessions, 3)
+  assert.equal(dead.family, 'strength')
+  assert.equal(dead.icon, 'barbell')
+  assert.equal(list[0].activity, 'Deadlift') // most-logged ranks first
+})
+
+test('exerciseDetail builds a chronological strength trend + lifetime records', () => {
+  const d = exerciseDetail(FIXTURE, 'strength', 'Deadlift')
+  assert.equal(d.sessionCount, 3)
+  assert.equal(d.points.length, 3)
+  // points ascend in time so the trend draws left→right
+  assert.ok(d.points[0].ts < d.points[1].ts && d.points[1].ts < d.points[2].ts)
+  // middle session aggregates BOTH deadlift entries
+  assert.equal(d.points[1].sets, 2)
+  assert.equal(d.points[1].topWeight_kg, 105)
+  assert.equal(d.points[1].volume_kg, 828) // 102.5*5 + 105*3
+  assert.equal(d.points[1].reps, 8)
+  // records
+  assert.equal(d.records.heaviest_kg, 107.5)
+  assert.equal(d.records.mostReps, 5)
+  assert.equal(d.records.bestSessionVolume_kg, 828)
+  assert.equal(d.records.totalVolume_kg, 1866) // 500 + 828 + 538
+  assert.equal(d.records.bestSetVolume_kg, 538) // round(107.5*5)
+  // set-records: best weight at each rep count, sorted by reps
+  assert.deepEqual(d.setRecords.map((s) => [s.reps, s.weight_kg]), [[3, 105], [5, 107.5]])
+})
+
+test('exerciseDetail summarizes cardio distance/pace and returns null when absent', () => {
+  const d = exerciseDetail(FIXTURE, 'running', 'Run')
+  assert.equal(d.family, 'cardio')
+  assert.equal(d.points.length, 2)
+  assert.equal(d.records.maxDistance_m, 10000)
+  assert.equal(d.records.maxDuration_s, 3000)
+  assert.equal(d.records.bestPace_s_per_km, 300)
+  assert.equal(d.records.totalDistance_m, 15000)
+  assert.equal(exerciseDetail(FIXTURE, 'strength', 'Nonexistent'), null)
 })

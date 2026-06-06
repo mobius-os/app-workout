@@ -31,7 +31,7 @@ If the user says `2 sets of deadlifts`, the agent should ask for reps and weight
 Three bottom tabs:
 
 - **Log** — the current session draft, your committed entries grouped into sessions, and a bounded, resizable Workout chat. A follow-up like "another set with 90" resolves in the ongoing chat context.
-- **Insights** — analytics *by category and exercise*: weekly volume (strength = kg·reps, cardio = km, other = minutes), category stats, main exercises, strength PRs ranked by estimated 1-rep max (Epley), cardio bests, and a year-at-a-glance streak heatmap.
+- **Insights** — analytics *by category and exercise*: weekly volume (strength = kg·reps, cardio = km, other = minutes), category stats, strength PRs ranked by estimated 1-rep max (Epley), cardio bests, and a year-at-a-glance streak heatmap. **Tap any exercise** (in the Exercises, Strength PRs, or Cardio bests tables) to open its drill-down: lifetime records (heaviest, est. 1RM, best set/session volume, most reps — or longest distance/time and best pace for cardio), a per-session trend sparkline (estimated-1RM for lifts, distance/pace for cardio), set-records (best weight at each rep count), and full session history. The trend is hand-drawn SVG, so the drill-down works offline like the rest of Insights.
 - **All** — a flat, newest-first list of every entry, with delete.
 
 ## Categories

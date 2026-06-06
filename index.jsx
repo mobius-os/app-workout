@@ -561,6 +561,225 @@ function cardioBests(entries) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-exercise analytics (Hevy-style). Every distinct activity gets a detail
+// view: lifetime records, set-records (best weight at each rep target, strength
+// only), and a per-session trend the UI draws as a hand-rolled SVG — no chart
+// runtime, so the drill-down works offline like the rest of Insights.
+//
+// An exercise is keyed by category + activity so a Deadlift logged as strength
+// never merges with a same-named entry in another category. The activity string
+// is matched exactly (the agent is consistent about names); the UI passes the
+// same category+activity it rendered, so a clicked row always resolves.
+// ---------------------------------------------------------------------------
+
+function exerciseKey(category, activity) {
+  return `${category}::${typeof activity === 'string' ? activity.trim() : ''}`
+}
+
+// Every logged exercise, one row, ranked by how often it's logged then recency.
+// Generalizes the old in-component exerciseStats (now testable here): each row
+// carries the headline best metric plus the category icon/color so the UI never
+// has to recompute them. Callers slice for "top N"; the full list is the
+// browse surface for the per-exercise drill-down.
+function exerciseList(entries) {
+  const sessions = groupSessions(entries)
+  const sessionByEntry = new Map()
+  for (const s of sessions) for (const e of s.entries) sessionByEntry.set(e.id, s.sessionId)
+
+  const byKey = new Map()
+  for (const e of entries || []) {
+    const key = exerciseKey(e.category, e.activity)
+    let row = byKey.get(key)
+    if (!row) {
+      row = {
+        key,
+        activity: e.activity,
+        category: e.category,
+        family: categoryFamily(e.category),
+        icon: CATEGORIES[e.category]?.icon || CATEGORIES.other.icon,
+        color: CATEGORIES[e.category]?.color || CATEGORIES.other.color,
+        entries: 0,
+        sessionIds: new Set(),
+        lastTs: 0,
+        best: '',
+        bestScore: 0,
+      }
+      byKey.set(key, row)
+    }
+    row.entries += 1
+    row.lastTs = Math.max(row.lastTs, Number(e.ts) || 0)
+    const sid = sessionByEntry.get(e.id)
+    if (sid) row.sessionIds.add(sid)
+    if (row.family === 'strength') {
+      for (const set of e.metrics?.sets || []) {
+        const score = epley1RM(set.weight_kg, set.reps)
+        if (score > row.bestScore) {
+          row.bestScore = score
+          row.best = `${fromKg(set.weight_kg, set.unit)}${set.unit || 'kg'} × ${set.reps}`
+        }
+      }
+    } else if (row.family === 'cardio') {
+      const distance = Number(e.metrics?.distance_m) || 0
+      const duration = Number(e.metrics?.duration_s) || 0
+      const score = distance || duration
+      if (score > row.bestScore) {
+        row.bestScore = score
+        row.best = [distance ? fmtDistance(distance) : '', duration ? fmtDuration(duration) : ''].filter(Boolean).join(' · ')
+      }
+    } else {
+      const duration = Number(e.metrics?.duration_s) || 0
+      if (duration > row.bestScore) {
+        row.bestScore = duration
+        row.best = fmtDuration(duration)
+      }
+    }
+  }
+  return [...byKey.values()]
+    .map((row) => ({
+      key: row.key,
+      activity: row.activity,
+      category: row.category,
+      family: row.family,
+      icon: row.icon,
+      color: row.color,
+      entries: row.entries,
+      sessions: row.sessionIds.size,
+      lastTs: row.lastTs,
+      best: row.best || '—',
+    }))
+    .sort((a, b) => (b.entries - a.entries) || (b.lastTs - a.lastTs))
+}
+
+// One point per session for the trend chart. Aggregates the exercise's sets/
+// metrics within a session: strength → best e1RM + top weight + tonnage;
+// cardio → summed distance/duration + pace; other → summed duration.
+function exerciseSessionPoint(session, family) {
+  const base = { ts: session.startTs, localDate: session.localDate }
+  if (family === 'strength') {
+    let topWeight = 0, bestE1rm = 0, volume = 0, reps = 0, sets = 0, unit = 'kg'
+    for (const e of session.entries) {
+      for (const set of e.metrics?.sets || []) {
+        const w = Number(set.weight_kg) || 0
+        const r = Number(set.reps) || 0
+        if (set.unit === 'lb') unit = 'lb'
+        if (w > topWeight) topWeight = w
+        const er = epley1RM(set.weight_kg, set.reps)
+        if (er > bestE1rm) bestE1rm = er
+        if (w > 0 && r > 0) { volume += w * r; reps += r; sets += 1 }
+      }
+    }
+    return { ...base, value: bestE1rm, e1rm: bestE1rm, topWeight_kg: topWeight, volume_kg: Math.round(volume), reps, sets, unit }
+  }
+  if (family === 'cardio') {
+    let distance = 0, duration = 0, elevation = 0
+    for (const e of session.entries) {
+      distance += Number(e.metrics?.distance_m) || 0
+      duration += Number(e.metrics?.duration_s) || 0
+      elevation += Number(e.metrics?.elevation_m) || 0
+    }
+    return { ...base, value: distance || duration, distance_m: distance, duration_s: duration, elevation_m: elevation, pace_s_per_km: paceSecPerKm(duration, distance) }
+  }
+  let duration = 0, note = null, location = null
+  for (const e of session.entries) {
+    duration += Number(e.metrics?.duration_s) || 0
+    if (!note) note = textOrNull(e.metrics?.note)
+    if (!location) location = textOrNull(e.metrics?.location)
+  }
+  return { ...base, value: duration, duration_s: duration, note, location }
+}
+
+// Lifetime headline records for one exercise, mirroring Hevy's summary tiles.
+function exerciseRecords(mine, points, family) {
+  if (family === 'strength') {
+    let heaviest = 0, bestE1rm = 0, bestSetVolume = 0, mostReps = 0, unit = 'kg', heaviestDate = null, e1rmDate = null
+    for (const e of mine) {
+      for (const set of e.metrics?.sets || []) {
+        const w = Number(set.weight_kg) || 0
+        const r = Number(set.reps) || 0
+        if (set.unit === 'lb') unit = 'lb'
+        if (w > heaviest) { heaviest = w; heaviestDate = e.localDate }
+        const er = epley1RM(set.weight_kg, set.reps)
+        if (er > bestE1rm) { bestE1rm = er; e1rmDate = e.localDate }
+        if (w > 0 && r > 0 && w * r > bestSetVolume) bestSetVolume = w * r
+        if (r > mostReps) mostReps = r
+      }
+    }
+    return {
+      family, unit,
+      heaviest_kg: heaviest, heaviestDate,
+      bestE1rm, e1rmDate,
+      bestSetVolume_kg: Math.round(bestSetVolume),
+      bestSessionVolume_kg: points.reduce((m, p) => Math.max(m, p.volume_kg || 0), 0),
+      totalVolume_kg: points.reduce((s, p) => s + (p.volume_kg || 0), 0),
+      mostReps,
+    }
+  }
+  if (family === 'cardio') {
+    let maxDistance = 0, maxDuration = 0, maxElevation = 0, bestPace = null, totalDistance = 0, totalDuration = 0
+    for (const p of points) {
+      if ((p.distance_m || 0) > maxDistance) maxDistance = p.distance_m
+      if ((p.duration_s || 0) > maxDuration) maxDuration = p.duration_s
+      if ((p.elevation_m || 0) > maxElevation) maxElevation = p.elevation_m
+      if (p.pace_s_per_km != null && (bestPace == null || p.pace_s_per_km < bestPace)) bestPace = p.pace_s_per_km
+      totalDistance += p.distance_m || 0
+      totalDuration += p.duration_s || 0
+    }
+    return { family, maxDistance_m: maxDistance, maxDuration_s: maxDuration, maxElevation_m: maxElevation, bestPace_s_per_km: bestPace, totalDistance_m: totalDistance, totalDuration_s: totalDuration }
+  }
+  let maxDuration = 0, totalDuration = 0
+  for (const p of points) {
+    if ((p.duration_s || 0) > maxDuration) maxDuration = p.duration_s
+    totalDuration += p.duration_s || 0
+  }
+  return { family, maxDuration_s: maxDuration, totalDuration_s: totalDuration, sessions: points.length }
+}
+
+// Best weight lifted at each rep count (strength only) — Hevy's "Set Records".
+function exerciseSetRecords(mine) {
+  const byReps = new Map()
+  for (const e of mine) {
+    for (const set of e.metrics?.sets || []) {
+      const w = Number(set.weight_kg) || 0
+      const r = Number(set.reps) || 0
+      if (w <= 0 || r <= 0) continue
+      const prev = byReps.get(r)
+      if (!prev || w > prev.weight_kg) {
+        byReps.set(r, { reps: r, weight_kg: w, unit: set.unit === 'lb' ? 'lb' : 'kg', localDate: e.localDate, e1rm: epley1RM(set.weight_kg, set.reps) })
+      }
+    }
+  }
+  return [...byReps.values()].sort((a, b) => a.reps - b.reps)
+}
+
+// The full drill-down for one exercise: chronological per-session points (for
+// the trend), lifetime records, and set-records. Returns null when the
+// exercise has no entries (e.g. it was just deleted).
+function exerciseDetail(entries, category, activity) {
+  const key = exerciseKey(category, activity)
+  const mine = (entries || []).filter((e) => exerciseKey(e.category, e.activity) === key)
+  if (mine.length === 0) return null
+  const family = categoryFamily(category)
+  const cat = CATEGORIES[category] || CATEGORIES.other
+  const sessions = groupSessions(mine) // ascending by startTs
+  const points = sessions.map((s) => exerciseSessionPoint(s, family))
+  return {
+    key,
+    activity: mine[mine.length - 1].activity || activity,
+    category,
+    family,
+    icon: cat.icon,
+    color: cat.color,
+    entryCount: mine.length,
+    sessionCount: sessions.length,
+    firstTs: sessions.length ? sessions[0].startTs : null,
+    lastTs: sessions.length ? sessions[sessions.length - 1].endTs : null,
+    points,
+    records: exerciseRecords(mine, points, family),
+    setRecords: family === 'strength' ? exerciseSetRecords(mine) : [],
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Category split for the donut: count of entries per category.
 // ---------------------------------------------------------------------------
 
@@ -700,12 +919,20 @@ function fmtDistance(metres) {
   return `${Math.round(m)}m`
 }
 
-function fmtPace(durationS, distanceM) {
+// Pace as a raw number (seconds per km) so analytics can compare/min it; the
+// display formatter (fmtPace) wraps this. Returns null when either side is
+// missing, so a duration-only or distance-only entry has no spurious pace.
+function paceSecPerKm(durationS, distanceM) {
   const d = Number(distanceM) || 0
   const s = Number(durationS) || 0
   if (d <= 0 || s <= 0) return null
   const secPerKm = s / (d / 1000)
-  if (!Number.isFinite(secPerKm)) return null
+  return Number.isFinite(secPerKm) ? secPerKm : null
+}
+
+function fmtPace(durationS, distanceM) {
+  const secPerKm = paceSecPerKm(durationS, distanceM)
+  if (secPerKm == null) return null
   const mins = Math.floor(secPerKm / 60)
   const secs = String(Math.round(secPerKm % 60)).padStart(2, '0')
   return `${mins}:${secs}/km`
@@ -1388,6 +1615,56 @@ const S = {
   },
   statValue: { fontSize: '18px', fontWeight: 800, margin: '7px 0 2px', fontVariantNumeric: 'tabular-nums' },
   statLabel: { fontSize: '11px', color: 'var(--muted)', fontWeight: 700 },
+
+  // A tappable exercise name (opens the per-exercise detail sheet). Renders as
+  // plain text but is a real <button> for keyboard + screen-reader access.
+  exLink: {
+    display: 'inline-flex', alignItems: 'center', gap: '7px',
+    background: 'none', border: 'none', padding: 0, margin: 0,
+    font: 'inherit', color: 'var(--text)', fontWeight: 700,
+    cursor: 'pointer', textAlign: 'left',
+  },
+  exChevron: { color: 'var(--muted)', fontWeight: 700, marginLeft: '2px' },
+
+  // Per-exercise detail sheet (Hevy-style drill-down).
+  sheetScrim: {
+    position: 'absolute', inset: 0, zIndex: 120, background: 'rgba(0,0,0,0.55)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
+  },
+  sheet: {
+    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px',
+    width: '100%', maxWidth: '480px', maxHeight: '88%',
+    display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    boxShadow: '0 18px 50px rgba(0,0,0,0.4)',
+  },
+  sheetHead: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
+    padding: '14px 14px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0,
+  },
+  sheetTitle: { fontSize: '16px', fontWeight: 800, margin: 0, letterSpacing: 0 },
+  sheetSub: { fontSize: '12px', color: 'var(--muted)', margin: '2px 0 0' },
+  sheetBody: { padding: '14px', overflowY: 'auto' },
+
+  recGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: '8px' },
+  recTile: {
+    border: '1px solid var(--border)', borderRadius: '8px', padding: '10px',
+    background: 'color-mix(in srgb, var(--bg) 55%, transparent)',
+  },
+  recLabel: { fontSize: '10.5px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px' },
+  recValue: { fontSize: '17px', fontWeight: 800, margin: '3px 0 0', fontVariantNumeric: 'tabular-nums' },
+
+  trendMeta: {
+    display: 'flex', justifyContent: 'space-between', gap: '10px',
+    fontSize: '11px', color: 'var(--muted)', fontWeight: 600, marginTop: '4px',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  histList: { display: 'flex', flexDirection: 'column' },
+  histRow: {
+    display: 'flex', justifyContent: 'space-between', gap: '10px',
+    padding: '9px 0', borderBottom: '1px solid var(--border)', fontSize: '13px',
+  },
+  histDate: { color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' },
+  histSummary: { textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
 }
 
 // ---------------------------------------------------------------------------
@@ -2134,62 +2411,237 @@ function categoryStats(entries) {
     .sort((a, b) => b.entries - a.entries)
 }
 
-function exerciseStats(entries) {
-  const sessions = groupSessions(entries)
-  const sessionByEntry = new Map()
-  for (const session of sessions) {
-    for (const entry of session.entries) sessionByEntry.set(entry.id, session.sessionId)
-  }
-  const byActivity = new Map()
-  for (const entry of entries || []) {
-    const key = `${entry.category}:${entry.activity}`
-    if (!byActivity.has(key)) {
-      byActivity.set(key, {
-        activity: entry.activity,
-        category: entry.category,
-        color: CATEGORIES[entry.category]?.color || CATEGORIES.other.color,
-        icon: CATEGORIES[entry.category]?.icon || CATEGORIES.other.icon,
-        entries: 0,
-        sessions: new Set(),
-        lastTs: 0,
-        best: '',
-        bestScore: 0,
-      })
+// Best weight (kg) rendered back in the user's chosen unit, e.g. "100kg".
+function fmtWeight(weightKg, unit) {
+  return `${fromKg(weightKg, unit)}${unit || 'kg'}`
+}
+
+// Pace number (seconds/km) → "5:00/km". Mirrors fmtPace but takes the already-
+// computed pace from a record so we don't re-derive distance/duration.
+function paceLabel(secPerKm) {
+  if (secPerKm == null) return '—'
+  const mins = Math.floor(secPerKm / 60)
+  const secs = String(Math.round(secPerKm % 60)).padStart(2, '0')
+  return `${mins}:${secs}/km`
+}
+
+function shortDate(ts) {
+  return new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+// ---------------------------------------------------------------------------
+// Sparkline — a hand-rolled SVG line for one exercise's per-session trend.
+// Like the Heatmap, it intentionally uses no chart runtime so the per-exercise
+// drill-down works offline. A single point renders as one dot.
+// ---------------------------------------------------------------------------
+
+function Sparkline({ points, color, label }) {
+  const vals = (points || []).map((p) => Number(p.value) || 0)
+  if (vals.length === 0) return null
+  const W = 320, H = 96, padX = 8, padTop = 12, padBottom = 14
+  const n = vals.length
+  const min = Math.min(...vals)
+  const max = Math.max(...vals)
+  const span = (max - min) || Math.max(1, max)
+  const x = (i) => (n <= 1 ? W / 2 : padX + (i * (W - 2 * padX)) / (n - 1))
+  const y = (v) => H - padBottom - ((v - min) / span) * (H - padTop - padBottom)
+  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(vals[i]).toFixed(1)}`).join(' ')
+  const area = n > 1 ? `${line} L${x(n - 1).toFixed(1)},${H - padBottom} L${x(0).toFixed(1)},${H - padBottom} Z` : ''
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}
+      role="img" aria-label={`${label || 'Trend'} across ${n} session${n === 1 ? '' : 's'}`}>
+      {area && <path d={area} fill={color} opacity={0.13} />}
+      {n > 1 && <path d={line} fill="none" stroke={color} strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />}
+      {points.map((p, i) => (
+        <circle key={i} cx={x(i)} cy={y(vals[i])} r={n > 30 ? 1.6 : 2.6} fill={color}>
+          <title>{shortDate(p.ts)}</title>
+        </circle>
+      ))}
+    </svg>
+  )
+}
+
+// Pick which series to plot for an exercise: strength → e1RM, cardio → distance
+// (or duration if it never logs distance), everything else → duration.
+function detailTrend(detail) {
+  const { family, points, records } = detail
+  if (points.length === 0) return null
+  if (family === 'strength') {
+    const unit = records.unit || 'kg'
+    return {
+      label: 'Estimated 1RM',
+      series: points.map((p) => ({ ts: p.ts, value: p.e1rm })),
+      fmt: (v) => fmtWeight(Math.round(v * 10) / 10, unit),
     }
-    const row = byActivity.get(key)
-    row.entries += 1
-    row.lastTs = Math.max(row.lastTs, Number(entry.ts) || 0)
-    const sid = sessionByEntry.get(entry.id)
-    if (sid) row.sessions.add(sid)
-    const fam = categoryFamily(entry.category)
-    if (fam === 'strength') {
-      for (const set of entry.metrics?.sets || []) {
-        const score = epley1RM(set.weight_kg, set.reps)
-        if (score > row.bestScore) {
-          row.bestScore = score
-          row.best = `${fromKg(set.weight_kg, set.unit)}${set.unit || 'kg'} × ${set.reps}`
-        }
-      }
-    } else if (fam === 'cardio') {
-      const distance = Number(entry.metrics?.distance_m) || 0
-      const duration = Number(entry.metrics?.duration_s) || 0
-      const score = distance || duration
-      if (score > row.bestScore) {
-        row.bestScore = score
-        row.best = [distance ? fmtDistance(distance) : '', duration ? fmtDuration(duration) : ''].filter(Boolean).join(' · ')
-      }
-    } else {
-      const duration = Number(entry.metrics?.duration_s) || 0
-      if (duration > row.bestScore) {
-        row.bestScore = duration
-        row.best = fmtDuration(duration)
-      }
-    }
   }
-  return [...byActivity.values()]
-    .map((row) => ({ ...row, sessions: row.sessions.size, best: row.best || '—' }))
-    .sort((a, b) => (b.entries - a.entries) || (b.lastTs - a.lastTs))
-    .slice(0, 6)
+  if (family === 'cardio') {
+    const hasDist = points.some((p) => (p.distance_m || 0) > 0)
+    return hasDist
+      ? { label: 'Distance', series: points.map((p) => ({ ts: p.ts, value: p.distance_m })), fmt: (v) => fmtDistance(v) }
+      : { label: 'Duration', series: points.map((p) => ({ ts: p.ts, value: p.duration_s })), fmt: (v) => fmtDuration(v) }
+  }
+  return { label: 'Duration', series: points.map((p) => ({ ts: p.ts, value: p.duration_s })), fmt: (v) => fmtDuration(v) }
+}
+
+// Headline record tiles per family, mirroring Hevy's exercise summary.
+function detailRecordTiles(detail) {
+  const r = detail.records
+  if (detail.family === 'strength') {
+    const unit = r.unit || 'kg'
+    return [
+      { label: 'Est. 1RM', value: r.bestE1rm ? fmtWeight(r.bestE1rm, unit) : '—' },
+      { label: 'Heaviest', value: r.heaviest_kg ? fmtWeight(r.heaviest_kg, unit) : '—' },
+      { label: 'Best set vol', value: r.bestSetVolume_kg ? `${Math.round(fromKg(r.bestSetVolume_kg, unit))} ${unit}` : '—' },
+      { label: 'Best session', value: r.bestSessionVolume_kg ? `${Math.round(fromKg(r.bestSessionVolume_kg, unit))} ${unit}` : '—' },
+      { label: 'Most reps', value: r.mostReps || '—' },
+    ]
+  }
+  if (detail.family === 'cardio') {
+    return [
+      { label: 'Longest', value: r.maxDistance_m ? fmtDistance(r.maxDistance_m) : '—' },
+      { label: 'Longest time', value: r.maxDuration_s ? fmtDuration(r.maxDuration_s) : '—' },
+      { label: 'Best pace', value: paceLabel(r.bestPace_s_per_km) },
+      { label: 'Total dist', value: r.totalDistance_m ? fmtDistance(r.totalDistance_m) : '—' },
+      ...(r.maxElevation_m ? [{ label: 'Max elev', value: `↑${Math.round(r.maxElevation_m)}m` }] : []),
+    ]
+  }
+  return [
+    { label: 'Longest', value: r.maxDuration_s ? fmtDuration(r.maxDuration_s) : '—' },
+    { label: 'Total time', value: r.totalDuration_s ? fmtDuration(r.totalDuration_s) : '—' },
+    { label: 'Sessions', value: detail.sessionCount },
+  ]
+}
+
+// One history line per session, newest first.
+function detailHistorySummary(point, family) {
+  if (family === 'strength') {
+    const parts = []
+    if (point.topWeight_kg) parts.push(`${fmtWeight(point.topWeight_kg, point.unit)} top`)
+    if (point.sets) parts.push(`${point.sets} set${point.sets === 1 ? '' : 's'}`)
+    if (point.volume_kg) parts.push(`${Math.round(fromKg(point.volume_kg, point.unit))} ${point.unit || 'kg'} vol`)
+    return parts.join(' · ') || '—'
+  }
+  if (family === 'cardio') {
+    const parts = []
+    if (point.distance_m) parts.push(fmtDistance(point.distance_m))
+    if (point.pace_s_per_km != null) parts.push(paceLabel(point.pace_s_per_km))
+    if (point.duration_s) parts.push(fmtDuration(point.duration_s))
+    if (point.elevation_m) parts.push(`↑${Math.round(point.elevation_m)}m`)
+    return parts.join(' · ') || '—'
+  }
+  const parts = []
+  if (point.duration_s) parts.push(fmtDuration(point.duration_s))
+  if (point.note) parts.push(point.note)
+  if (point.location) parts.push(point.location)
+  return parts.join(' · ') || '—'
+}
+
+// ---------------------------------------------------------------------------
+// ExerciseDetailSheet — the Hevy-style per-exercise drill-down: records,
+// a trend sparkline, set-records (strength), and full session history.
+// ---------------------------------------------------------------------------
+
+function ExerciseDetailSheet({ detail, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const trend = detailTrend(detail)
+  const tiles = detailRecordTiles(detail)
+  const history = [...detail.points].reverse()
+  const range = detail.firstTs
+    ? `${shortDate(detail.firstTs)} – ${shortDate(detail.lastTs)}`
+    : ''
+
+  return (
+    <div style={S.sheetScrim} onClick={onClose} role="presentation">
+      <div style={S.sheet} onClick={(e) => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-label={`${detail.activity} details`}>
+        <div style={S.sheetHead}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+            <div style={S.entryIcon(detail.color)} aria-hidden>
+              <SportIcon name={detail.icon} color={detail.color} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <h3 style={S.sheetTitle}>{detail.activity}</h3>
+              <p style={S.sheetSub}>
+                {CATEGORIES[detail.category]?.label || detail.category} · {detail.sessionCount} session{detail.sessionCount === 1 ? '' : 's'}{range ? ` · ${range}` : ''}
+              </p>
+            </div>
+          </div>
+          <button style={S.iconBtn('var(--muted)')} onClick={onClose} aria-label="Close" title="Close">×</button>
+        </div>
+
+        <div style={S.sheetBody}>
+          <div style={S.recGrid}>
+            {tiles.map((t) => (
+              <div key={t.label} style={S.recTile}>
+                <div style={S.recLabel}>{t.label}</div>
+                <div style={S.recValue}>{t.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {trend && (
+            <div style={{ ...S.chartCard, marginTop: '14px' }}>
+              <h3 style={S.chartTitle}>{trend.label} over time</h3>
+              {detail.points.length >= 2 ? (
+                <>
+                  <Sparkline points={trend.series} color={detail.color} label={trend.label} />
+                  <div style={S.trendMeta}>
+                    <span>{shortDate(trend.series[0].ts)} · {trend.fmt(trend.series[0].value)}</span>
+                    <span>{shortDate(trend.series[trend.series.length - 1].ts)} · {trend.fmt(trend.series[trend.series.length - 1].value)}</span>
+                  </div>
+                </>
+              ) : (
+                <p style={S.chartSub}>Log this {detail.family === 'strength' ? 'lift' : 'activity'} again to see a trend.</p>
+              )}
+            </div>
+          )}
+
+          {detail.setRecords.length > 0 && (
+            <div style={{ ...S.chartCard, marginTop: '14px' }}>
+              <h3 style={S.chartTitle}>Set records</h3>
+              <p style={S.chartSub}>Best weight at each rep count.</p>
+              <table style={S.prTable}>
+                <thead>
+                  <tr>
+                    <th style={S.prTh}>Reps</th>
+                    <th style={{ ...S.prTh, textAlign: 'right' }}>Best weight</th>
+                    <th style={{ ...S.prTh, textAlign: 'right' }}>e1RM</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.setRecords.map((s) => (
+                    <tr key={s.reps}>
+                      <td style={S.prTd}>{s.reps}</td>
+                      <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtWeight(s.weight_kg, s.unit)}</td>
+                      <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtWeight(s.e1rm, s.unit)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div style={{ ...S.chartCard, marginTop: '14px', marginBottom: 0 }}>
+            <h3 style={S.chartTitle}>History</h3>
+            <p style={S.chartSub}>Every session, newest first.</p>
+            <div style={S.histList}>
+              {history.map((p, i) => (
+                <div key={`${p.ts}-${i}`} style={{ ...S.histRow, ...(i === history.length - 1 ? { borderBottom: 'none' } : null) }}>
+                  <span style={S.histDate}>{new Date(p.ts).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                  <span style={S.histSummary}>{detailHistorySummary(p, detail.family)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function CategoryVolumeBars({ weeks }) {
@@ -2254,13 +2706,30 @@ function CategoryStats({ stats }) {
   )
 }
 
+// A tappable exercise name + icon that opens the per-exercise detail sheet.
+function ExerciseLink({ icon, color, activity, onOpen }) {
+  return (
+    <button type="button" style={S.exLink} onClick={onOpen} aria-label={`${activity} details`}>
+      <SportIcon name={icon} color={color} size={16} />
+      {activity}
+      <span style={S.exChevron} aria-hidden>›</span>
+    </button>
+  )
+}
+
 function InsightsTab({ entries }) {
   const weeks = useMemo(() => weeklyVolumeByCategory(entries), [entries])
   const stats = useMemo(() => categoryStats(entries), [entries])
-  const exercises = useMemo(() => exerciseStats(entries), [entries])
+  const exercises = useMemo(() => exerciseList(entries), [entries])
   const prs = useMemo(() => strengthPRs(entries), [entries])
   const cardio = useMemo(() => cardioBests(entries), [entries])
   const streak = useMemo(() => currentStreak(entries), [entries])
+  const [selected, setSelected] = useState(null) // { category, activity }
+  const detail = useMemo(
+    () => (selected ? exerciseDetail(entries, selected.category, selected.activity) : null),
+    [entries, selected],
+  )
+  const openEx = (category, activity) => setSelected({ category, activity })
 
   if (entries.length === 0) {
     return (
@@ -2298,8 +2767,8 @@ function InsightsTab({ entries }) {
 
       {exercises.length > 0 && (
         <div style={S.chartCard}>
-          <h3 style={S.chartTitle}>Main exercises</h3>
-          <p style={S.chartSub}>Most logged activities with their best stored metric.</p>
+          <h3 style={S.chartTitle}>Exercises</h3>
+          <p style={S.chartSub}>Tap any exercise for its trend, records, and full history.</p>
           <table style={S.prTable}>
             <thead>
               <tr>
@@ -2309,13 +2778,11 @@ function InsightsTab({ entries }) {
               </tr>
             </thead>
             <tbody>
-              {exercises.map((row) => (
-                <tr key={`${row.category}:${row.activity}`}>
+              {exercises.slice(0, 8).map((row) => (
+                <tr key={row.key}>
                   <td style={S.prTd}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
-                      <SportIcon name={row.icon} color={row.color} size={16} />
-                      {row.activity}
-                    </span>
+                    <ExerciseLink icon={row.icon} color={row.color} activity={row.activity}
+                      onOpen={() => openEx(row.category, row.activity)} />
                   </td>
                   <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.best}</td>
                   <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.sessions}</td>
@@ -2329,7 +2796,7 @@ function InsightsTab({ entries }) {
       {prs.length > 0 && (
         <div style={S.chartCard}>
           <h3 style={S.chartTitle}>Strength PRs</h3>
-          <p style={S.chartSub}>Ranked by estimated 1-rep max (Epley).</p>
+          <p style={S.chartSub}>Ranked by estimated 1-rep max (Epley). Tap a lift for its trend.</p>
           <table style={S.prTable}>
             <thead>
               <tr>
@@ -2341,7 +2808,11 @@ function InsightsTab({ entries }) {
             <tbody>
               {prs.map((p) => (
                 <tr key={p.activity}>
-                  <td style={S.prTd}>{p.activity}</td>
+                  <td style={S.prTd}>
+                    <button type="button" style={S.exLink} onClick={() => openEx('strength', p.activity)} aria-label={`${p.activity} details`}>
+                      {p.activity}<span style={S.exChevron} aria-hidden>›</span>
+                    </button>
+                  </td>
                   <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                     {fromKg(p.weight_kg, p.unit)}{p.unit} × {p.reps}
                   </td>
@@ -2358,7 +2829,7 @@ function InsightsTab({ entries }) {
       {cardio.length > 0 && (
         <div style={S.chartCard}>
           <h3 style={S.chartTitle}>Cardio bests</h3>
-          <p style={S.chartSub}>Longest distance and duration per activity.</p>
+          <p style={S.chartSub}>Longest distance and duration per activity. Tap one for its trend.</p>
           <table style={S.prTable}>
             <thead>
               <tr>
@@ -2370,7 +2841,11 @@ function InsightsTab({ entries }) {
             <tbody>
               {cardio.map((c) => (
                 <tr key={c.activity}>
-                  <td style={S.prTd}>{c.activity}</td>
+                  <td style={S.prTd}>
+                    <button type="button" style={S.exLink} onClick={() => openEx(c.category, c.activity)} aria-label={`${c.activity} details`}>
+                      {c.activity}<span style={S.exChevron} aria-hidden>›</span>
+                    </button>
+                  </td>
                   <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                     {c.maxDistance_m ? fmtDistance(c.maxDistance_m) : '—'}
                   </td>
@@ -2383,6 +2858,8 @@ function InsightsTab({ entries }) {
           </table>
         </div>
       )}
+
+      {detail && <ExerciseDetailSheet detail={detail} onClose={() => setSelected(null)} />}
     </div>
   )
 }

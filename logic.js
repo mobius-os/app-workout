@@ -553,6 +553,225 @@ export function cardioBests(entries) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-exercise analytics (Hevy-style). Every distinct activity gets a detail
+// view: lifetime records, set-records (best weight at each rep target, strength
+// only), and a per-session trend the UI draws as a hand-rolled SVG — no chart
+// runtime, so the drill-down works offline like the rest of Insights.
+//
+// An exercise is keyed by category + activity so a Deadlift logged as strength
+// never merges with a same-named entry in another category. The activity string
+// is matched exactly (the agent is consistent about names); the UI passes the
+// same category+activity it rendered, so a clicked row always resolves.
+// ---------------------------------------------------------------------------
+
+export function exerciseKey(category, activity) {
+  return `${category}::${typeof activity === 'string' ? activity.trim() : ''}`
+}
+
+// Every logged exercise, one row, ranked by how often it's logged then recency.
+// Generalizes the old in-component exerciseStats (now testable here): each row
+// carries the headline best metric plus the category icon/color so the UI never
+// has to recompute them. Callers slice for "top N"; the full list is the
+// browse surface for the per-exercise drill-down.
+export function exerciseList(entries) {
+  const sessions = groupSessions(entries)
+  const sessionByEntry = new Map()
+  for (const s of sessions) for (const e of s.entries) sessionByEntry.set(e.id, s.sessionId)
+
+  const byKey = new Map()
+  for (const e of entries || []) {
+    const key = exerciseKey(e.category, e.activity)
+    let row = byKey.get(key)
+    if (!row) {
+      row = {
+        key,
+        activity: e.activity,
+        category: e.category,
+        family: categoryFamily(e.category),
+        icon: CATEGORIES[e.category]?.icon || CATEGORIES.other.icon,
+        color: CATEGORIES[e.category]?.color || CATEGORIES.other.color,
+        entries: 0,
+        sessionIds: new Set(),
+        lastTs: 0,
+        best: '',
+        bestScore: 0,
+      }
+      byKey.set(key, row)
+    }
+    row.entries += 1
+    row.lastTs = Math.max(row.lastTs, Number(e.ts) || 0)
+    const sid = sessionByEntry.get(e.id)
+    if (sid) row.sessionIds.add(sid)
+    if (row.family === 'strength') {
+      for (const set of e.metrics?.sets || []) {
+        const score = epley1RM(set.weight_kg, set.reps)
+        if (score > row.bestScore) {
+          row.bestScore = score
+          row.best = `${fromKg(set.weight_kg, set.unit)}${set.unit || 'kg'} × ${set.reps}`
+        }
+      }
+    } else if (row.family === 'cardio') {
+      const distance = Number(e.metrics?.distance_m) || 0
+      const duration = Number(e.metrics?.duration_s) || 0
+      const score = distance || duration
+      if (score > row.bestScore) {
+        row.bestScore = score
+        row.best = [distance ? fmtDistance(distance) : '', duration ? fmtDuration(duration) : ''].filter(Boolean).join(' · ')
+      }
+    } else {
+      const duration = Number(e.metrics?.duration_s) || 0
+      if (duration > row.bestScore) {
+        row.bestScore = duration
+        row.best = fmtDuration(duration)
+      }
+    }
+  }
+  return [...byKey.values()]
+    .map((row) => ({
+      key: row.key,
+      activity: row.activity,
+      category: row.category,
+      family: row.family,
+      icon: row.icon,
+      color: row.color,
+      entries: row.entries,
+      sessions: row.sessionIds.size,
+      lastTs: row.lastTs,
+      best: row.best || '—',
+    }))
+    .sort((a, b) => (b.entries - a.entries) || (b.lastTs - a.lastTs))
+}
+
+// One point per session for the trend chart. Aggregates the exercise's sets/
+// metrics within a session: strength → best e1RM + top weight + tonnage;
+// cardio → summed distance/duration + pace; other → summed duration.
+function exerciseSessionPoint(session, family) {
+  const base = { ts: session.startTs, localDate: session.localDate }
+  if (family === 'strength') {
+    let topWeight = 0, bestE1rm = 0, volume = 0, reps = 0, sets = 0, unit = 'kg'
+    for (const e of session.entries) {
+      for (const set of e.metrics?.sets || []) {
+        const w = Number(set.weight_kg) || 0
+        const r = Number(set.reps) || 0
+        if (set.unit === 'lb') unit = 'lb'
+        if (w > topWeight) topWeight = w
+        const er = epley1RM(set.weight_kg, set.reps)
+        if (er > bestE1rm) bestE1rm = er
+        if (w > 0 && r > 0) { volume += w * r; reps += r; sets += 1 }
+      }
+    }
+    return { ...base, value: bestE1rm, e1rm: bestE1rm, topWeight_kg: topWeight, volume_kg: Math.round(volume), reps, sets, unit }
+  }
+  if (family === 'cardio') {
+    let distance = 0, duration = 0, elevation = 0
+    for (const e of session.entries) {
+      distance += Number(e.metrics?.distance_m) || 0
+      duration += Number(e.metrics?.duration_s) || 0
+      elevation += Number(e.metrics?.elevation_m) || 0
+    }
+    return { ...base, value: distance || duration, distance_m: distance, duration_s: duration, elevation_m: elevation, pace_s_per_km: paceSecPerKm(duration, distance) }
+  }
+  let duration = 0, note = null, location = null
+  for (const e of session.entries) {
+    duration += Number(e.metrics?.duration_s) || 0
+    if (!note) note = textOrNull(e.metrics?.note)
+    if (!location) location = textOrNull(e.metrics?.location)
+  }
+  return { ...base, value: duration, duration_s: duration, note, location }
+}
+
+// Lifetime headline records for one exercise, mirroring Hevy's summary tiles.
+function exerciseRecords(mine, points, family) {
+  if (family === 'strength') {
+    let heaviest = 0, bestE1rm = 0, bestSetVolume = 0, mostReps = 0, unit = 'kg', heaviestDate = null, e1rmDate = null
+    for (const e of mine) {
+      for (const set of e.metrics?.sets || []) {
+        const w = Number(set.weight_kg) || 0
+        const r = Number(set.reps) || 0
+        if (set.unit === 'lb') unit = 'lb'
+        if (w > heaviest) { heaviest = w; heaviestDate = e.localDate }
+        const er = epley1RM(set.weight_kg, set.reps)
+        if (er > bestE1rm) { bestE1rm = er; e1rmDate = e.localDate }
+        if (w > 0 && r > 0 && w * r > bestSetVolume) bestSetVolume = w * r
+        if (r > mostReps) mostReps = r
+      }
+    }
+    return {
+      family, unit,
+      heaviest_kg: heaviest, heaviestDate,
+      bestE1rm, e1rmDate,
+      bestSetVolume_kg: Math.round(bestSetVolume),
+      bestSessionVolume_kg: points.reduce((m, p) => Math.max(m, p.volume_kg || 0), 0),
+      totalVolume_kg: points.reduce((s, p) => s + (p.volume_kg || 0), 0),
+      mostReps,
+    }
+  }
+  if (family === 'cardio') {
+    let maxDistance = 0, maxDuration = 0, maxElevation = 0, bestPace = null, totalDistance = 0, totalDuration = 0
+    for (const p of points) {
+      if ((p.distance_m || 0) > maxDistance) maxDistance = p.distance_m
+      if ((p.duration_s || 0) > maxDuration) maxDuration = p.duration_s
+      if ((p.elevation_m || 0) > maxElevation) maxElevation = p.elevation_m
+      if (p.pace_s_per_km != null && (bestPace == null || p.pace_s_per_km < bestPace)) bestPace = p.pace_s_per_km
+      totalDistance += p.distance_m || 0
+      totalDuration += p.duration_s || 0
+    }
+    return { family, maxDistance_m: maxDistance, maxDuration_s: maxDuration, maxElevation_m: maxElevation, bestPace_s_per_km: bestPace, totalDistance_m: totalDistance, totalDuration_s: totalDuration }
+  }
+  let maxDuration = 0, totalDuration = 0
+  for (const p of points) {
+    if ((p.duration_s || 0) > maxDuration) maxDuration = p.duration_s
+    totalDuration += p.duration_s || 0
+  }
+  return { family, maxDuration_s: maxDuration, totalDuration_s: totalDuration, sessions: points.length }
+}
+
+// Best weight lifted at each rep count (strength only) — Hevy's "Set Records".
+function exerciseSetRecords(mine) {
+  const byReps = new Map()
+  for (const e of mine) {
+    for (const set of e.metrics?.sets || []) {
+      const w = Number(set.weight_kg) || 0
+      const r = Number(set.reps) || 0
+      if (w <= 0 || r <= 0) continue
+      const prev = byReps.get(r)
+      if (!prev || w > prev.weight_kg) {
+        byReps.set(r, { reps: r, weight_kg: w, unit: set.unit === 'lb' ? 'lb' : 'kg', localDate: e.localDate, e1rm: epley1RM(set.weight_kg, set.reps) })
+      }
+    }
+  }
+  return [...byReps.values()].sort((a, b) => a.reps - b.reps)
+}
+
+// The full drill-down for one exercise: chronological per-session points (for
+// the trend), lifetime records, and set-records. Returns null when the
+// exercise has no entries (e.g. it was just deleted).
+export function exerciseDetail(entries, category, activity) {
+  const key = exerciseKey(category, activity)
+  const mine = (entries || []).filter((e) => exerciseKey(e.category, e.activity) === key)
+  if (mine.length === 0) return null
+  const family = categoryFamily(category)
+  const cat = CATEGORIES[category] || CATEGORIES.other
+  const sessions = groupSessions(mine) // ascending by startTs
+  const points = sessions.map((s) => exerciseSessionPoint(s, family))
+  return {
+    key,
+    activity: mine[mine.length - 1].activity || activity,
+    category,
+    family,
+    icon: cat.icon,
+    color: cat.color,
+    entryCount: mine.length,
+    sessionCount: sessions.length,
+    firstTs: sessions.length ? sessions[0].startTs : null,
+    lastTs: sessions.length ? sessions[sessions.length - 1].endTs : null,
+    points,
+    records: exerciseRecords(mine, points, family),
+    setRecords: family === 'strength' ? exerciseSetRecords(mine) : [],
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Category split for the donut: count of entries per category.
 // ---------------------------------------------------------------------------
 
@@ -692,12 +911,20 @@ export function fmtDistance(metres) {
   return `${Math.round(m)}m`
 }
 
-function fmtPace(durationS, distanceM) {
+// Pace as a raw number (seconds per km) so analytics can compare/min it; the
+// display formatter (fmtPace) wraps this. Returns null when either side is
+// missing, so a duration-only or distance-only entry has no spurious pace.
+export function paceSecPerKm(durationS, distanceM) {
   const d = Number(distanceM) || 0
   const s = Number(durationS) || 0
   if (d <= 0 || s <= 0) return null
   const secPerKm = s / (d / 1000)
-  if (!Number.isFinite(secPerKm)) return null
+  return Number.isFinite(secPerKm) ? secPerKm : null
+}
+
+export function fmtPace(durationS, distanceM) {
+  const secPerKm = paceSecPerKm(durationS, distanceM)
+  if (secPerKm == null) return null
   const mins = Math.floor(secPerKm / 60)
   const secs = String(Math.round(secPerKm % 60)).padStart(2, '0')
   return `${mins}:${secs}/km`
