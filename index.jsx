@@ -1265,390 +1265,380 @@ function workoutAgentPrompt(appId) {
 }
 
 // ---------------------------------------------------------------------------
-// Styles — every color/font is a CSS token painted by the Möbius shell, so the
-// app inherits future themes for free. Single object named `S`.
+// Styles — one module-level stylesheet (the `wk-` prefix scopes it to this
+// app's iframe) rendered once at the root as <style>{CSS}</style>. Every
+// color/font is a CSS token painted by the Möbius shell, so the app inherits
+// future themes for free. Render-time dynamic values (per-category accent
+// colors, the measured chat-panel height, the bar-fill %) stay inline; every
+// app-driven state that used to be an S.foo(active) helper is now a modifier
+// class (.is-active / :disabled). Shared-chrome blocks are fenced with
+// mobius-ui markers so a future extraction is mechanical.
 // ---------------------------------------------------------------------------
 
-const S = {
-  root: {
-    height: '100%', display: 'flex', flexDirection: 'column',
-    background: 'var(--bg)', color: 'var(--text)', fontFamily: 'var(--font)',
-    maxWidth: '100%', overflow: 'hidden',
-  },
-  // Web cap so the column doesn't sprawl on desktop while staying mobile-first.
-  inner: {
-    width: '100%', maxWidth: '720px', marginLeft: 'auto', marginRight: 'auto',
-  },
-  header: {
-    padding: '12px 16px 10px', display: 'flex', alignItems: 'center',
-    justifyContent: 'space-between', flexShrink: 0,
-    borderBottom: '1px solid var(--border)',
-    background: 'var(--surface)',
-  },
-  title: { fontSize: '18px', fontWeight: 760, letterSpacing: 0, margin: 0 },
-  subtitle: { fontSize: '12px', color: 'var(--muted)', margin: '2px 0 0' },
-
-  scroll: {
-    flex: 1, overflowY: 'auto', overflowX: 'hidden',
-    padding: '14px 16px 16px',
-    wordBreak: 'break-word', overflowWrap: 'anywhere',
-    minHeight: 0,
-  },
-
-  tabbar: {
-    flexShrink: 0,
-    display: 'flex', background: 'var(--surface)',
-    borderBottom: '1px solid var(--border)',
-    padding: '8px 12px',
-    gap: '4px',
-  },
-  tabBtn: (active) => ({
-    flex: 1, padding: '10px 8px', border: '1px solid transparent', cursor: 'pointer',
-    borderRadius: '8px',
-    background: active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
-    color: active ? 'var(--text)' : 'var(--muted)',
-    fontFamily: 'var(--font)', fontSize: '12px', fontWeight: 700,
-    display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: '6px',
-    minHeight: '44px',
-  }),
-  tabIcon: { display: 'flex', lineHeight: 1 },
-
-  chatPanel: {
-    flex: '0 0 auto',
-    minHeight: 'min(360px, 70%)',
-    maxHeight: 'calc(100% - 110px)',
-    display: 'flex',
-    flexDirection: 'column',
-    background: 'var(--bg)',
-  },
-  chatResizer: {
-    flex: '0 0 9px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'ns-resize',
-    background: 'var(--surface)',
-    borderTop: '1px solid var(--border)',
-    borderBottom: '1px solid var(--border)',
-    touchAction: 'none',
-  },
-  chatResizerBar: {
-    width: '44px',
-    height: '3px',
-    borderRadius: '999px',
-    background: 'color-mix(in srgb, var(--muted) 65%, transparent)',
-  },
-  chatHead: {
-    flex: '0 0 auto',
-    display: 'flex',
-    alignItems: 'baseline',
-    gap: '10px',
-    minHeight: '34px',
-    padding: '7px 12px',
-    borderBottom: '1px solid var(--border)',
-    background: 'var(--surface)',
-  },
-  chatHeadTitle: {
-    fontSize: '11px',
-    lineHeight: 1,
-    color: 'var(--muted)',
-    fontWeight: 800,
-    letterSpacing: 0,
-  },
-  chatHeadHint: {
-    fontSize: '12px',
-    color: 'var(--muted)',
-    overflow: 'hidden',
-    whiteSpace: 'nowrap',
-    textOverflow: 'ellipsis',
-  },
-  chatEmbed: {
-    flex: '1 1 auto',
-    minHeight: 0,
-    overflow: 'hidden',
-    background: 'var(--bg)',
-  },
-  chatError: {
-    flex: '0 0 auto',
-    margin: '8px 14px 0',
-    padding: '8px 10px',
-    border: '1px solid var(--border)',
-    borderRadius: '8px',
-    background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
-    color: 'var(--text)',
-    fontSize: '12px',
-  },
-
-  card: {
-    background: 'var(--surface)', border: '1px solid var(--border)',
-    borderRadius: '8px', padding: '16px', marginBottom: '14px',
-  },
-  cardTitle: { fontSize: '16px', fontWeight: 700, margin: '0 0 4px' },
-  cardSub: { fontSize: '12px', color: 'var(--muted)', margin: '0 0 12px' },
-
-  btnPrimary: {
-    width: '100%', padding: '14px 16px', borderRadius: '12px',
-    border: 'none', background: 'var(--accent)', color: '#fff',
-    fontFamily: 'var(--font)', fontSize: '15px', fontWeight: 600,
-    cursor: 'pointer', minHeight: '48px',
-  },
-  btnSecondary: {
-    padding: '12px 14px', borderRadius: '10px', minHeight: '44px',
-    border: '1px solid var(--border)', background: 'var(--surface2, var(--surface))',
-    color: 'var(--text)', fontFamily: 'var(--font)',
-    fontSize: '14px', fontWeight: 600, cursor: 'pointer',
-  },
-  btnGhost: {
-    padding: '10px 12px', borderRadius: '8px', minHeight: '44px',
-    border: 'none', background: 'transparent',
-    color: 'var(--accent)', fontFamily: 'var(--font)',
-    fontSize: '13px', fontWeight: 600, cursor: 'pointer',
-  },
-  btnRow: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
-
-  // Entry feed card
-  entryCard: {
-    background: 'color-mix(in srgb, var(--surface) 94%, #000)',
-    border: '1px solid var(--border)',
-    borderRadius: '8px', padding: '10px', marginBottom: '8px',
-    display: 'flex', gap: '10px', alignItems: 'center',
-  },
-  entryIcon: (color) => ({
-    width: '34px', height: '34px', borderRadius: '8px', flexShrink: 0,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '18px', background: `${color}22`, border: `1px solid ${color}55`,
-  }),
-  entryBody: { flex: 1, minWidth: 0 },
-  entryTop: { display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'baseline' },
-  entryName: { fontSize: '15px', fontWeight: 760, margin: 0, letterSpacing: 0 },
-  entryTime: { fontSize: '11px', color: 'var(--muted)', whiteSpace: 'nowrap' },
-  entryMeta: { fontSize: '13px', color: 'var(--text)', margin: '5px 0 0', fontVariantNumeric: 'tabular-nums' },
-  entryRaw: { fontSize: '11px', color: 'var(--muted)', margin: '6px 0 0', fontStyle: 'italic' },
-  entryActions: { display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 },
-  iconBtn: (color = 'var(--muted)') => ({
-    width: '32px', height: '32px', borderRadius: '8px',
-    border: 'none', background: 'transparent', color,
-    fontFamily: 'var(--font)', fontSize: '14px', fontWeight: 800,
-    cursor: 'pointer', display: 'inline-flex', alignItems: 'center',
-    justifyContent: 'center', lineHeight: 1,
-  }),
-
-  currentSession: {
-    border: '1px solid var(--border)',
-    borderRadius: '8px',
-    background: 'var(--surface)',
-    marginBottom: '14px',
-    overflow: 'hidden',
-  },
-  currentSessionHead: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: '12px',
-    padding: '12px',
-    borderBottom: '1px solid var(--border)',
-  },
-  currentSessionTitle: {
-    margin: 0,
-    fontSize: '14px',
-    lineHeight: 1.25,
-    fontWeight: 800,
-    letterSpacing: 0,
-  },
-  currentSessionSub: {
-    margin: '3px 0 0',
-    color: 'var(--muted)',
-    fontSize: '12px',
-  },
-  currentSessionList: {
-    padding: '8px 10px 2px',
-  },
-  currentSessionEmpty: {
-    padding: '16px 12px',
-    color: 'var(--muted)',
-    fontSize: '13px',
-  },
-  currentSessionMissing: {
-    margin: '0',
-    padding: '0 12px 12px',
-    color: 'var(--muted)',
-    fontSize: '12px',
-    lineHeight: 1.45,
-  },
-  finishBtn: (enabled) => ({
-    padding: '10px 12px',
-    minHeight: '38px',
-    borderRadius: '8px',
-    border: 'none',
-    background: 'var(--accent)',
-    color: '#fff',
-    fontFamily: 'var(--font)',
-    fontSize: '13px',
-    fontWeight: 800,
-    whiteSpace: 'nowrap',
-    opacity: enabled ? 1 : 0.52,
-    cursor: enabled ? 'pointer' : 'not-allowed',
-  }),
-
-  sessionLabel: {
-    display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '12px',
-    fontSize: '12px', color: 'var(--muted)', fontWeight: 700, margin: '20px 0 9px',
-  },
-  sessionDate: {
-    color: 'var(--text)', fontSize: '13px', fontWeight: 800, letterSpacing: 0,
-  },
-  sessionSpan: {
-    fontSize: '11px', color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap',
-  },
-
-  // Inputs (confirm card + manual fallback)
-  textInput: {
-    width: '100%', fontFamily: 'var(--font)', fontSize: '14px',
-    padding: '12px', minHeight: '44px',
-    background: 'var(--surface2, var(--surface))', color: 'var(--text)',
-    border: '1px solid var(--border)', borderRadius: '10px',
-    outline: 'none', boxSizing: 'border-box',
-  },
-  label: { fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px', color: 'var(--muted)' },
-
-  setRow: {
-    display: 'grid', gridTemplateColumns: '24px 1fr 1fr auto',
-    alignItems: 'center', gap: '8px', padding: '6px 0',
-  },
-
-  // Category chips for the confirm card
-  chipRow: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' },
-  chip: (active, color) => ({
-    padding: '8px 12px', borderRadius: '999px', minHeight: '44px',
-    border: `1px solid ${active ? color : 'var(--border)'}`,
-    background: active ? `${color}22` : 'transparent',
-    color: active ? 'var(--text)' : 'var(--muted)',
-    fontSize: '13px', fontWeight: 600, cursor: 'pointer',
-    fontFamily: 'var(--font)', display: 'flex', alignItems: 'center', gap: '6px',
-  }),
-
-  chartCard: {
-    background: 'color-mix(in srgb, var(--surface) 94%, #000)', border: '1px solid var(--border)',
-    borderRadius: '8px', padding: '14px', marginBottom: '14px',
-  },
-  chartTitle: { fontSize: '14px', fontWeight: 700, margin: '0 0 2px' },
-  chartSub: { fontSize: '11px', color: 'var(--muted)', margin: '0 0 10px' },
-
-  prTable: { width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginTop: '4px' },
-  prTh: {
-    textAlign: 'left', fontWeight: 600, color: 'var(--muted)',
-    padding: '8px 6px', borderBottom: '1px solid var(--border)',
-    fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px',
-  },
-  prTd: { padding: '10px 6px', borderBottom: '1px solid var(--border)' },
-
-  heatmap: { width: '100%', height: 'auto', display: 'block', marginTop: '8px' },
-
-  empty: {
-    textAlign: 'center', padding: '48px 16px', color: 'var(--muted)',
-    fontSize: '13px', lineHeight: 1.6,
-  },
-  emptyIcon: {
-    width: '58px', height: '58px', borderRadius: '18px', margin: '0 auto 14px',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
-    border: '1px solid color-mix(in srgb, var(--accent) 34%, var(--border))',
-  },
-  loading: { textAlign: 'center', padding: '40px 16px', color: 'var(--muted)', fontSize: '13px' },
-
-  // In-app confirm modal for destructive actions in the sandbox.
-  modalScrim: {
-    position: 'absolute', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.5)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
-  },
-  modal: {
-    background: 'var(--surface)', borderRadius: '14px', border: '1px solid var(--border)',
-    padding: '20px', maxWidth: '320px', width: '100%',
-    boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
-  },
-  modalTitle: { fontSize: '16px', fontWeight: 700, margin: '0 0 6px' },
-  modalBody: { fontSize: '13px', color: 'var(--muted)', margin: '0 0 16px', lineHeight: 1.5 },
-  modalBtns: { display: 'flex', gap: '8px', justifyContent: 'flex-end' },
-
-  pill: (variant) => ({
-    fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '999px',
-    letterSpacing: '0.2px',
-    background: variant === 'offline' || variant === 'pending'
-      ? 'var(--surface2, var(--surface))' : 'transparent',
-    border: `1px solid ${variant === 'offline' ? 'var(--accent)' : 'var(--border)'}`,
-    color: variant === 'offline' ? 'var(--accent)' : 'var(--muted)',
-    whiteSpace: 'nowrap',
-  }),
-
-  barList: { display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' },
-  barRow: { display: 'grid', gridTemplateColumns: '88px 1fr 48px', gap: '10px', alignItems: 'center' },
-  barLabel: { fontSize: '12px', color: 'var(--muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' },
-  barTrack: {
-    height: '10px', borderRadius: '999px',
-    background: 'color-mix(in srgb, var(--border) 72%, transparent)', overflow: 'hidden',
-  },
-  barFill: (color, pct) => ({
-    height: '100%', width: `${Math.max(3, Math.min(100, pct))}%`,
-    borderRadius: '999px', background: color,
-  }),
-  statGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(138px, 1fr))', gap: '10px' },
-  statTile: {
-    border: '1px solid var(--border)', borderRadius: '8px', padding: '12px',
-    background: 'color-mix(in srgb, var(--bg) 55%, transparent)',
-  },
-  statValue: { fontSize: '18px', fontWeight: 800, margin: '7px 0 2px', fontVariantNumeric: 'tabular-nums' },
-  statLabel: { fontSize: '11px', color: 'var(--muted)', fontWeight: 700 },
-
-  // A tappable exercise name (opens the per-exercise detail sheet). Renders as
-  // plain text but is a real <button> for keyboard + screen-reader access.
-  exLink: {
-    display: 'inline-flex', alignItems: 'center', gap: '7px',
-    background: 'none', border: 'none', padding: 0, margin: 0,
-    font: 'inherit', color: 'var(--text)', fontWeight: 700,
-    cursor: 'pointer', textAlign: 'left',
-  },
-  exChevron: { color: 'var(--muted)', fontWeight: 700, marginLeft: '2px' },
-
-  // Per-exercise detail sheet (Hevy-style drill-down).
-  sheetScrim: {
-    position: 'absolute', inset: 0, zIndex: 120, background: 'rgba(0,0,0,0.55)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
-  },
-  sheet: {
-    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px',
-    width: '100%', maxWidth: '480px', maxHeight: '88%',
-    display: 'flex', flexDirection: 'column', overflow: 'hidden',
-    boxShadow: '0 18px 50px rgba(0,0,0,0.4)',
-  },
-  sheetHead: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
-    padding: '14px 14px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0,
-  },
-  sheetTitle: { fontSize: '16px', fontWeight: 800, margin: 0, letterSpacing: 0 },
-  sheetSub: { fontSize: '12px', color: 'var(--muted)', margin: '2px 0 0' },
-  sheetBody: { padding: '14px', overflowY: 'auto' },
-
-  recGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: '8px' },
-  recTile: {
-    border: '1px solid var(--border)', borderRadius: '8px', padding: '10px',
-    background: 'color-mix(in srgb, var(--bg) 55%, transparent)',
-  },
-  recLabel: { fontSize: '10.5px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px' },
-  recValue: { fontSize: '17px', fontWeight: 800, margin: '3px 0 0', fontVariantNumeric: 'tabular-nums' },
-
-  trendMeta: {
-    display: 'flex', justifyContent: 'space-between', gap: '10px',
-    fontSize: '11px', color: 'var(--muted)', fontWeight: 600, marginTop: '4px',
-    fontVariantNumeric: 'tabular-nums',
-  },
-  histList: { display: 'flex', flexDirection: 'column' },
-  histRow: {
-    display: 'flex', justifyContent: 'space-between', gap: '10px',
-    padding: '9px 0', borderBottom: '1px solid var(--border)', fontSize: '13px',
-  },
-  histDate: { color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' },
-  histSummary: { textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
+const CSS = `
+/* mobius-ui:Root v1 — keep in sync; library candidate. Diverge below the marker only. */
+.wk-root {
+  position: relative;
+  display: flex; flex-direction: column;
+  height: 100%; width: 100%; max-width: 100%;
+  overflow: hidden;
+  background: var(--bg); color: var(--text); font-family: var(--font);
 }
+.wk-scroll {
+  flex: 1; min-height: 0;
+  overflow-y: auto; overflow-x: hidden;
+  padding: 14px 16px 16px;
+  word-break: break-word; overflow-wrap: anywhere;
+}
+/* /mobius-ui:Root */
+
+/* Web cap so the column doesn't sprawl on desktop while staying mobile-first. */
+.wk-inner { width: 100%; max-width: 720px; margin-left: auto; margin-right: auto; }
+
+/* mobius-ui:Header v1 — keep in sync; library candidate. Diverge below the marker only. */
+.wk-header {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px 10px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.wk-title { margin: 0; font-size: 18px; font-weight: 760; letter-spacing: 0; }
+.wk-subtitle { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+/* /mobius-ui:Header */
+
+/* mobius-ui:Segmented v1 — keep in sync; library candidate. Diverge below the marker only. */
+.wk-tabbar {
+  flex: 0 0 auto;
+  display: flex; gap: 4px; padding: 8px 12px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.wk-tab-btn {
+  flex: 1; min-height: 44px; padding: 10px 8px;
+  display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--muted);
+  font-family: var(--font); font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.wk-tab-btn.is-active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+}
+.wk-tab-icon { display: flex; line-height: 1; }
+/* /mobius-ui:Segmented */
+
+/* mobius-ui:ChatEmbed v1 — keep in sync; library candidate. Diverge below the marker only. */
+.wk-chat-embed {
+  flex: 1 1 auto; min-height: 0;
+  overflow: hidden; background: var(--bg);
+}
+.wk-chat-embed iframe { display: block; width: 100%; height: 100%; border: 0; }
+/* /mobius-ui:ChatEmbed */
+
+/* Resizable embedded-chat panel — app-specific drag chrome above the ChatEmbed. */
+.wk-chat-panel {
+  flex: 0 0 auto;
+  min-height: min(360px, 70%);
+  max-height: calc(100% - 110px);
+  display: flex; flex-direction: column;
+  background: var(--bg);
+}
+.wk-chat-resizer {
+  flex: 0 0 9px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: ns-resize;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  touch-action: none;
+}
+.wk-chat-resizer-bar {
+  width: 44px; height: 3px; border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 65%, transparent);
+}
+.wk-chat-error {
+  flex: 0 0 auto;
+  margin: 8px 14px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text); font-size: 12px;
+}
+
+/* mobius-ui:Card v1 — keep in sync; library candidate. Diverge below the marker only. */
+.wk-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 16px; margin-bottom: 14px;
+}
+.wk-card.is-ambiguous { border-color: var(--accent); }
+.wk-card-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; }
+.wk-card-sub { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
+/* /mobius-ui:Card */
+
+/* mobius-ui:Button v1 — keep in sync; library candidate. Diverge below the marker only. */
+.wk-btn-primary {
+  width: 100%; min-height: 48px; padding: 14px 16px; border-radius: 12px;
+  border: none; background: var(--accent); color: #fff;
+  font-family: var(--font); font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.wk-btn-secondary {
+  min-height: 44px; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface2, var(--surface));
+  color: var(--text); font-family: var(--font);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.wk-btn-secondary.is-block { width: 100%; }
+.wk-btn-secondary.is-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+.wk-btn-ghost {
+  min-height: 44px; padding: 10px 12px; border-radius: 8px;
+  border: none; background: transparent; color: var(--accent);
+  font-family: var(--font); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.wk-btn-ghost.is-muted { color: var(--muted); }
+.wk-btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+/* /mobius-ui:Button */
+
+/* Entry feed card — app-specific list row with a per-category icon tile. */
+.wk-entry-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px; margin-bottom: 8px;
+  background: color-mix(in srgb, var(--surface) 94%, #000);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.wk-entry-card.is-draft { background: color-mix(in srgb, var(--bg) 62%, var(--surface)); }
+.wk-entry-icon {
+  width: 34px; height: 34px; flex-shrink: 0; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center; font-size: 18px;
+}
+.wk-entry-body { flex: 1; min-width: 0; }
+.wk-entry-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.wk-entry-name { margin: 0; font-size: 15px; font-weight: 760; letter-spacing: 0; }
+.wk-entry-time { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.wk-entry-meta { margin: 5px 0 0; font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; }
+.wk-entry-raw { margin: 6px 0 0; font-size: 11px; color: var(--muted); font-style: italic; }
+.wk-entry-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.wk-icon-btn {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center; line-height: 1;
+  border: none; background: transparent; color: var(--muted);
+  font-family: var(--font); font-size: 14px; font-weight: 800; cursor: pointer;
+}
+.wk-icon-btn.is-accent { color: var(--accent); }
+
+/* Current-session draft panel — app-specific. */
+.wk-current-session {
+  margin-bottom: 14px; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+}
+.wk-current-session-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px; border-bottom: 1px solid var(--border);
+}
+.wk-current-session-title { margin: 0; font-size: 14px; line-height: 1.25; font-weight: 800; letter-spacing: 0; }
+.wk-current-session-sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.wk-current-session-list { padding: 8px 10px 2px; }
+.wk-current-session-empty { padding: 16px 12px; color: var(--muted); font-size: 13px; }
+.wk-current-session-missing { margin: 0; padding: 0 12px 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.wk-finish-btn {
+  min-height: 38px; padding: 10px 12px; border-radius: 8px;
+  border: none; background: var(--accent); color: #fff;
+  font-family: var(--font); font-size: 13px; font-weight: 800;
+  white-space: nowrap; cursor: pointer;
+}
+.wk-finish-btn:disabled { opacity: 0.52; cursor: not-allowed; }
+
+/* Date-group label rows in the log / all tabs — app-specific. */
+.wk-session-label {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  margin: 20px 0 9px; font-size: 12px; color: var(--muted); font-weight: 700;
+}
+.wk-session-date { color: var(--text); font-size: 13px; font-weight: 800; letter-spacing: 0; }
+.wk-session-span { font-size: 11px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+
+/* mobius-ui:Input v1 — keep in sync; library candidate. Diverge below the marker only. */
+.wk-input {
+  display: block; width: 100%; box-sizing: border-box; min-height: 44px; padding: 12px;
+  background: var(--surface2, var(--surface)); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  outline: none; font-family: var(--font); font-size: 14px;
+}
+.wk-input.is-auto { width: auto; }
+.wk-label { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+/* /mobius-ui:Input */
+
+.wk-set-row {
+  display: grid; grid-template-columns: 24px 1fr 1fr auto;
+  align-items: center; gap: 8px; padding: 6px 0;
+}
+.wk-set-index { font-size: 13px; font-weight: 600; color: var(--muted); }
+
+/* Category chips for the confirm card — app-specific (per-category accent inline). */
+.wk-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.wk-chip {
+  display: flex; align-items: center; gap: 6px;
+  min-height: 44px; padding: 8px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  font-family: var(--font); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+
+/* Chart / insight cards — app-specific. */
+.wk-chart-card {
+  background: color-mix(in srgb, var(--surface) 94%, #000); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px; margin-bottom: 14px;
+}
+.wk-chart-card.is-nested { margin-top: 14px; }
+.wk-chart-card.is-last { margin-top: 14px; margin-bottom: 0; }
+.wk-chart-title { margin: 0 0 2px; font-size: 14px; font-weight: 700; }
+.wk-chart-sub { margin: 0 0 10px; font-size: 11px; color: var(--muted); }
+.wk-streak-value { font-size: 34px; font-weight: 800; color: var(--accent); }
+.wk-streak-unit { font-size: 15px; font-weight: 600; color: var(--muted); }
+
+.wk-pr-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+.wk-pr-th {
+  padding: 8px 6px; text-align: left; font-weight: 600; color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.wk-pr-th.is-right { text-align: right; }
+.wk-pr-td { padding: 10px 6px; border-bottom: 1px solid var(--border); }
+.wk-pr-td.is-right { text-align: right; font-variant-numeric: tabular-nums; }
+.wk-pr-td.is-strong { font-weight: 700; }
+
+.wk-heatmap { display: block; width: 100%; height: auto; margin-top: 8px; }
+.wk-sparkline { display: block; width: 100%; height: auto; }
+
+/* mobius-ui:Empty v1 — keep in sync; library candidate. Diverge below the marker only. */
+.wk-empty {
+  padding: 48px 16px; text-align: center; color: var(--muted);
+  font-size: 13px; line-height: 1.6;
+}
+.wk-empty.is-inline { padding: 18px 8px; }
+.wk-empty-icon {
+  width: 58px; height: 58px; margin: 0 auto 14px; border-radius: 18px;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+/* /mobius-ui:Empty */
+
+.wk-loading { padding: 40px 16px; text-align: center; color: var(--muted); font-size: 13px; }
+
+/* mobius-ui:Sheet v1 — keep in sync; library candidate. Diverge below the marker only. */
+.wk-modal-scrim {
+  position: absolute; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; background: rgba(0, 0, 0, 0.5);
+}
+.wk-modal {
+  width: 100%; max-width: 320px; padding: 20px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+.wk-modal-title { margin: 0 0 6px; font-size: 16px; font-weight: 700; }
+.wk-modal-body { margin: 0 0 16px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.wk-modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
+/* /mobius-ui:Sheet */
+
+/* mobius-ui:SyncPill v1 — keep in sync; library candidate. */
+.wk-pill {
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.2px; white-space: nowrap;
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+}
+.wk-pill.is-pending { background: var(--surface2, var(--surface)); }
+.wk-pill.is-offline {
+  background: var(--surface2, var(--surface));
+  border-color: var(--accent); color: var(--accent);
+}
+/* /mobius-ui:SyncPill */
+
+/* Category-volume bars — app-specific (per-category accent inline). */
+.wk-bar-list { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.wk-bar-row { display: grid; grid-template-columns: 88px 1fr 48px; gap: 10px; align-items: center; }
+.wk-bar-label { font-size: 12px; color: var(--muted); font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+.wk-bar-label.is-right { text-align: right; font-variant-numeric: tabular-nums; }
+.wk-bar-track {
+  height: 10px; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--border) 72%, transparent);
+}
+.wk-bar-fill { height: 100%; border-radius: 999px; }
+
+/* Category stat tiles — app-specific. */
+.wk-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(138px, 1fr)); gap: 10px; }
+.wk-stat-tile {
+  padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+.wk-stat-head { display: flex; align-items: center; gap: 8px; }
+.wk-stat-value { margin: 7px 0 2px; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.wk-stat-label { font-size: 11px; color: var(--muted); font-weight: 700; }
+
+/* A tappable exercise name (opens the per-exercise detail sheet). Renders as
+   plain text but is a real <button> for keyboard + screen-reader access. */
+.wk-ex-link {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 0; margin: 0; border: none; background: none;
+  font: inherit; color: var(--text); font-weight: 700; cursor: pointer; text-align: left;
+}
+.wk-ex-chevron { margin-left: 2px; color: var(--muted); font-weight: 700; }
+
+/* Per-exercise detail sheet (Hevy-style drill-down) — Sheet variant: centered,
+   all-corner radius, full-height column with its own scroll body. */
+/* mobius-ui:Sheet v1 — keep in sync; library candidate. Diverge below the marker only. */
+.wk-sheet-scrim {
+  position: absolute; inset: 0; z-index: 120;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(0, 0, 0, 0.55);
+}
+.wk-sheet {
+  width: 100%; max-width: 480px; max-height: 88%;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
+}
+.wk-sheet-head {
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 14px 14px 12px; border-bottom: 1px solid var(--border);
+}
+.wk-sheet-title { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: 0; }
+.wk-sheet-sub { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.wk-sheet-body { padding: 14px; overflow-y: auto; }
+/* /mobius-ui:Sheet */
+
+.wk-sheet-head-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+.wk-rec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+.wk-rec-tile {
+  padding: 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+.wk-rec-label { font-size: 10.5px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+.wk-rec-value { margin: 3px 0 0; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+.wk-trend-meta {
+  display: flex; justify-content: space-between; gap: 10px; margin-top: 4px;
+  font-size: 11px; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.wk-hist-list { display: flex; flex-direction: column; }
+.wk-hist-row {
+  display: flex; justify-content: space-between; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px;
+}
+.wk-hist-row.is-last { border-bottom: none; }
+.wk-hist-date { color: var(--muted); font-weight: 600; white-space: nowrap; }
+.wk-hist-summary { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Confirm-card layout helpers — app-specific spacers + grids. */
+.wk-spacer-10 { height: 10px; }
+.wk-spacer-12 { height: 12px; }
+.wk-spacer-14 { height: 14px; }
+.wk-spacer-16 { height: 16px; }
+.wk-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.wk-grid-metric { display: grid; grid-template-columns: 1fr 80px; gap: 8px; align-items: end; }
+.wk-btn-row-finish { justify-content: space-between; align-items: center; margin-top: 4px; }
+.wk-min44 { min-width: 44px; }
+`
+
 
 // ---------------------------------------------------------------------------
 // Sync status — observes the offline runtime and exposes a {state, pending,
@@ -1703,8 +1693,11 @@ function SyncPill({ status }) {
   else if (flash === 'saved') { label = 'Saved'; variant = 'saved' }
   else if (flash === 'pending') { label = 'Queued'; variant = 'pending' }
   else return null
+  const mod = variant === 'offline'
+    ? ' is-offline'
+    : (variant === 'pending' ? ' is-pending' : '')
   return (
-    <span style={S.pill(variant)} role="status" aria-live="polite"
+    <span className={`wk-pill${mod}`} role="status" aria-live="polite"
       aria-label={variant === 'offline' ? `Offline${pending > 0 ? `, ${pending} pending` : ''}` : label}>
       {label}
     </span>
@@ -1717,14 +1710,14 @@ function SyncPill({ status }) {
 
 function ConfirmModal({ title, body, confirmLabel, onConfirm, onCancel }) {
   return (
-    <div style={S.modalScrim} onClick={onCancel} role="dialog" aria-modal="true">
-      <div style={S.modal} onClick={(e) => e.stopPropagation()}>
-        <h3 style={S.modalTitle}>{title}</h3>
-        <p style={S.modalBody}>{body}</p>
-        <div style={S.modalBtns}>
-          <button style={S.btnSecondary} onClick={onCancel} aria-label="Cancel">Cancel</button>
+    <div className="wk-modal-scrim" onClick={onCancel} role="dialog" aria-modal="true">
+      <div className="wk-modal" onClick={(e) => e.stopPropagation()}>
+        <h3 className="wk-modal-title">{title}</h3>
+        <p className="wk-modal-body">{body}</p>
+        <div className="wk-modal-btns">
+          <button className="wk-btn-secondary" onClick={onCancel} aria-label="Cancel">Cancel</button>
           <button
-            style={{ ...S.btnSecondary, background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' }}
+            className="wk-btn-secondary is-danger"
             onClick={onConfirm}
             aria-label={confirmLabel}
           >
@@ -1817,110 +1810,115 @@ function ConfirmCard({
   }
 
   return (
-    <div style={{ ...S.card, borderColor: ambiguous ? 'var(--accent)' : 'var(--border)' }}>
-      <h3 style={S.cardTitle}>
+    <div className={`wk-card${ambiguous ? ' is-ambiguous' : ''}`}>
+      <h3 className="wk-card-title">
         {title || (ambiguous ? 'Check this one' : 'Edit entry')}
         {total > 1 ? ` · ${position}/${total}` : ''}
       </h3>
       {ambiguous && clarification ? (
-        <p style={S.cardSub}>{clarification}</p>
+        <p className="wk-card-sub">{clarification}</p>
       ) : (
-        <p style={S.cardSub}>
+        <p className="wk-card-sub">
           {total > 1
             ? 'Tweak anything, then save this part and review the next one.'
             : 'Tweak anything, then save it to your log.'}
         </p>
       )}
 
-      <label style={S.label}>Activity</label>
+      <label className="wk-label">Activity</label>
       <input
-        style={S.textInput} value={activity}
+        className="wk-input" value={activity}
         onChange={(e) => setActivity(e.target.value)}
         aria-label="Activity name" placeholder="e.g. Deadlift, Trail run"
       />
 
-      <div style={{ height: '12px' }} />
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+      <div className="wk-spacer-12" />
+      <div className="wk-grid-2">
         <div>
-          <label style={S.label}>Date</label>
+          <label className="wk-label">Date</label>
           <input
-            style={S.textInput} type="date" value={dateValue}
+            className="wk-input" type="date" value={dateValue}
             onChange={(e) => setDateValue(e.target.value)}
             aria-label="Entry date"
           />
         </div>
         <div>
-          <label style={S.label}>Time</label>
+          <label className="wk-label">Time</label>
           <input
-            style={S.textInput} type="time" value={timeValue}
+            className="wk-input" type="time" value={timeValue}
             onChange={(e) => setTimeValue(e.target.value)}
             aria-label="Entry time"
           />
         </div>
       </div>
 
-      <div style={{ height: '12px' }} />
-      <label style={S.label}>Category</label>
-      <div style={S.chipRow}>
-        {CATEGORY_KEYS.map((k) => (
-          <button
-            key={k} style={S.chip(k === category, CATEGORIES[k].color)}
-            onClick={() => setCategory(k)}
-            aria-label={`Category ${CATEGORIES[k].label}`}
-            aria-pressed={k === category}
-          >
-            <SportIcon name={CATEGORIES[k].icon} color={CATEGORIES[k].color} size={16} />{CATEGORIES[k].label}
-          </button>
-        ))}
+      <div className="wk-spacer-12" />
+      <label className="wk-label">Category</label>
+      <div className="wk-chip-row">
+        {CATEGORY_KEYS.map((k) => {
+          const active = k === category
+          const color = CATEGORIES[k].color
+          return (
+            <button
+              key={k} className="wk-chip"
+              style={active ? { borderColor: color, background: `${color}22`, color: 'var(--text)' } : undefined}
+              onClick={() => setCategory(k)}
+              aria-label={`Category ${CATEGORIES[k].label}`}
+              aria-pressed={active}
+            >
+              <SportIcon name={CATEGORIES[k].icon} color={CATEGORIES[k].color} size={16} />{CATEGORIES[k].label}
+            </button>
+          )
+        })}
       </div>
 
-      <div style={{ height: '14px' }} />
+      <div className="wk-spacer-14" />
       {fam === 'strength' ? (
         <div>
-          <label style={S.label}>Sets</label>
+          <label className="wk-label">Sets</label>
           {sets.map((s, i) => (
-            <div key={i} style={S.setRow}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--muted)' }}>{i + 1}</span>
+            <div key={i} className="wk-set-row">
+              <span className="wk-set-index">{i + 1}</span>
               <input
-                style={S.textInput} type="number" inputMode="decimal" value={s.weight}
+                className="wk-input" type="number" inputMode="decimal" value={s.weight}
                 onChange={(e) => updateSet(i, { weight: e.target.value })}
                 aria-label={`Set ${i + 1} weight`} placeholder="n/a"
               />
               <input
-                style={S.textInput} type="number" inputMode="numeric" value={s.reps}
+                className="wk-input" type="number" inputMode="numeric" value={s.reps}
                 onChange={(e) => updateSet(i, { reps: e.target.value })}
                 aria-label={`Set ${i + 1} reps`} placeholder="n/a"
               />
               <button
-                style={{ ...S.btnGhost, color: 'var(--muted)', minWidth: '44px' }}
+                className="wk-btn-ghost is-muted wk-min44"
                 onClick={() => removeSet(i)} aria-label={`Remove set ${i + 1}`}
               >×</button>
             </div>
           ))}
-          <div style={{ ...S.btnRow, justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+          <div className="wk-btn-row wk-btn-row-finish">
             <select
               value={sets[0]?.unit || 'kg'}
               onChange={(e) => setSets((prev) => prev.map((s) => ({ ...s, unit: e.target.value })))}
-              style={{ ...S.textInput, width: 'auto' }} aria-label="Weight unit"
+              className="wk-input is-auto" aria-label="Weight unit"
             >
               <option value="kg">kg</option>
               <option value="lb">lb</option>
             </select>
-            <button style={S.btnGhost} onClick={addSet} aria-label="Add set">+ set</button>
+            <button className="wk-btn-ghost" onClick={addSet} aria-label="Add set">+ set</button>
           </div>
         </div>
       ) : (
         <div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px', gap: '8px', alignItems: 'end' }}>
+          <div className="wk-grid-metric">
             <div>
-              <label style={S.label}>Duration</label>
+              <label className="wk-label">Duration</label>
               <input
-                style={S.textInput} type="number" inputMode="decimal" value={duration}
+                className="wk-input" type="number" inputMode="decimal" value={duration}
                 onChange={(e) => setDuration(e.target.value)} aria-label="Duration" placeholder="n/a"
               />
             </div>
             <select value={durationUnit} onChange={(e) => setDurationUnit(e.target.value)}
-              style={S.textInput} aria-label="Duration unit">
+              className="wk-input" aria-label="Duration unit">
               <option value="min">min</option>
               <option value="h">h</option>
               <option value="s">s</option>
@@ -1928,42 +1926,42 @@ function ConfirmCard({
           </div>
           {fam === 'cardio' && (
             <>
-              <div style={{ height: '10px' }} />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px', gap: '8px', alignItems: 'end' }}>
+              <div className="wk-spacer-10" />
+              <div className="wk-grid-metric">
                 <div>
-                  <label style={S.label}>Distance</label>
+                  <label className="wk-label">Distance</label>
                   <input
-                    style={S.textInput} type="number" inputMode="decimal" value={distance}
+                    className="wk-input" type="number" inputMode="decimal" value={distance}
                     onChange={(e) => setDistance(e.target.value)} aria-label="Distance" placeholder="n/a"
                   />
                 </div>
                 <select value={distanceUnit} onChange={(e) => setDistanceUnit(e.target.value)}
-                  style={S.textInput} aria-label="Distance unit">
+                  className="wk-input" aria-label="Distance unit">
                   <option value="km">km</option>
                   <option value="mi">mi</option>
                   <option value="m">m</option>
                 </select>
               </div>
-              <div style={{ height: '10px' }} />
-              <label style={S.label}>Elevation gain (m)</label>
+              <div className="wk-spacer-10" />
+              <label className="wk-label">Elevation gain (m)</label>
               <input
-                style={S.textInput} type="number" inputMode="decimal" value={elevation}
+                className="wk-input" type="number" inputMode="decimal" value={elevation}
                 onChange={(e) => setElevation(e.target.value)} aria-label="Elevation gain in metres" placeholder="n/a"
               />
             </>
           )}
-          <div style={{ height: '10px' }} />
-          <label style={S.label}>Location</label>
+          <div className="wk-spacer-10" />
+          <label className="wk-label">Location</label>
           <input
-            style={S.textInput} value={location}
+            className="wk-input" value={location}
             onChange={(e) => setLocation(e.target.value)} aria-label="Location" placeholder="optional"
           />
           {fam === 'other' && (
             <>
-              <div style={{ height: '10px' }} />
-              <label style={S.label}>Note</label>
+              <div className="wk-spacer-10" />
+              <label className="wk-label">Note</label>
               <input
-                style={S.textInput} value={note}
+                className="wk-input" value={note}
                 onChange={(e) => setNote(e.target.value)} aria-label="Note" placeholder="optional"
               />
             </>
@@ -1971,12 +1969,12 @@ function ConfirmCard({
         </div>
       )}
 
-      <div style={{ height: '16px' }} />
-      <button style={S.btnPrimary} onClick={handleCommit} aria-label="Save entry">
+      <div className="wk-spacer-16" />
+      <button className="wk-btn-primary" onClick={handleCommit} aria-label="Save entry">
         {commitLabel || (total > 1 && position < total ? 'Save and review next' : 'Save to log')}
       </button>
-      <div style={{ height: '10px' }} />
-      <button style={{ ...S.btnSecondary, width: '100%' }} onClick={onCancel} aria-label="Discard entry">Discard</button>
+      <div className="wk-spacer-10" />
+      <button className="wk-btn-secondary is-block" onClick={onCancel} aria-label="Discard entry">Discard</button>
     </div>
   )
 }
@@ -2091,10 +2089,9 @@ function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height }) 
   }, [systemPrompt])
 
   return (
-    <section className="workout-chat-panel" style={{ ...S.chatPanel, flex: `0 0 ${height}%` }}>
-      {error && <div style={S.chatError}>{error}</div>}
-      <style>{'.workout-chat-embed iframe{display:block;width:100%;height:100%;border:0}'}</style>
-      <div className="workout-chat-embed" style={S.chatEmbed} ref={mountRef} />
+    <section className="workout-chat-panel wk-chat-panel" style={{ flex: `0 0 ${height}%` }}>
+      {error && <div className="wk-chat-error">{error}</div>}
+      <div className="wk-chat-embed" ref={mountRef} />
     </section>
   )
 }
@@ -2103,26 +2100,26 @@ function EntryCard({ entry, onDelete, onEdit }) {
   const cat = CATEGORIES[entry.category] || CATEGORIES.other
   const time = new Date(entry.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   return (
-    <div style={S.entryCard}>
-      <div style={S.entryIcon(cat.color)} aria-hidden>
+    <div className="wk-entry-card">
+      <div className="wk-entry-icon" style={{ background: `${cat.color}22`, border: `1px solid ${cat.color}55` }} aria-hidden>
         <SportIcon name={entry.icon || cat.icon} color={cat.color} />
       </div>
-      <div style={S.entryBody}>
-        <div style={S.entryTop}>
-          <h4 style={S.entryName}>{entry.activity}</h4>
-          <span style={S.entryTime}>{time}</span>
+      <div className="wk-entry-body">
+        <div className="wk-entry-top">
+          <h4 className="wk-entry-name">{entry.activity}</h4>
+          <span className="wk-entry-time">{time}</span>
         </div>
-        <p style={S.entryMeta}>{summarizeMetrics(entry) || cat.label}</p>
+        <p className="wk-entry-meta">{summarizeMetrics(entry) || cat.label}</p>
       </div>
-      <div style={S.entryActions}>
+      <div className="wk-entry-actions">
         <button
-          style={S.iconBtn('var(--accent)')}
+          className="wk-icon-btn is-accent"
           onClick={() => onEdit(entry)}
           aria-label={`Edit ${entry.activity}`}
           title="Edit"
         >✎</button>
         <button
-          style={S.iconBtn('var(--muted)')}
+          className="wk-icon-btn"
           onClick={() => onDelete(entry.id)}
           aria-label={`Delete ${entry.activity}`}
           title="Delete"
@@ -2135,16 +2132,16 @@ function EntryCard({ entry, onDelete, onEdit }) {
 function SessionDraftCard({ entry }) {
   const cat = CATEGORIES[entry.category] || CATEGORIES.other
   return (
-    <div style={{ ...S.entryCard, background: 'color-mix(in srgb, var(--bg) 62%, var(--surface))' }}>
-      <div style={S.entryIcon(cat.color)} aria-hidden>
+    <div className="wk-entry-card is-draft">
+      <div className="wk-entry-icon" style={{ background: `${cat.color}22`, border: `1px solid ${cat.color}55` }} aria-hidden>
         <SportIcon name={entry.icon || cat.icon} color={cat.color} />
       </div>
-      <div style={S.entryBody}>
-        <div style={S.entryTop}>
-          <h4 style={S.entryName}>{entry.activity}</h4>
-          <span style={S.entryTime}>{cat.label}</span>
+      <div className="wk-entry-body">
+        <div className="wk-entry-top">
+          <h4 className="wk-entry-name">{entry.activity}</h4>
+          <span className="wk-entry-time">{cat.label}</span>
         </div>
-        <p style={S.entryMeta}>{summarizeMetrics(entry) || cat.label}</p>
+        <p className="wk-entry-meta">{summarizeMetrics(entry) || cat.label}</p>
       </div>
     </div>
   )
@@ -2159,11 +2156,11 @@ function CurrentSessionPanel({ session, onFinish, finishing = false }) {
     ? new Date(normalized.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     : null
   return (
-    <section style={S.currentSession} aria-label="Current session">
-      <div style={S.currentSessionHead}>
+    <section className="wk-current-session" aria-label="Current session">
+      <div className="wk-current-session-head">
         <div style={{ minWidth: 0 }}>
-          <h3 style={S.currentSessionTitle}>Current session</h3>
-          <p style={S.currentSessionSub}>
+          <h3 className="wk-current-session-title">Current session</h3>
+          <p className="wk-current-session-sub">
             {entries.length > 0
               ? `${entries.length} ${entries.length === 1 ? 'activity' : 'activities'}${started ? ` · started ${started}` : ''}`
               : 'No active activities yet'}
@@ -2171,7 +2168,7 @@ function CurrentSessionPanel({ session, onFinish, finishing = false }) {
         </div>
         <button
           type="button"
-          style={S.finishBtn(ready)}
+          className="wk-finish-btn"
           disabled={!ready}
           onClick={onFinish}
           aria-label="Finish session"
@@ -2181,14 +2178,14 @@ function CurrentSessionPanel({ session, onFinish, finishing = false }) {
         </button>
       </div>
       {entries.length > 0 ? (
-        <div style={S.currentSessionList}>
+        <div className="wk-current-session-list">
           {entries.map((entry) => <SessionDraftCard key={entry.id} entry={entry} />)}
         </div>
       ) : (
-        <div style={S.currentSessionEmpty}>Tell the agent what you did.</div>
+        <div className="wk-current-session-empty">Tell the agent what you did.</div>
       )}
       {missing.length > 0 && (
-        <p style={S.currentSessionMissing}>Missing: {missing.join(', ')}.</p>
+        <p className="wk-current-session-missing">Missing: {missing.join(', ')}.</p>
       )}
     </section>
   )
@@ -2198,8 +2195,8 @@ function LogTab({ entries, onDelete, onEdit }) {
   const groups = useMemo(() => groupEntriesByDate(entries), [entries])
   if (entries.length === 0) {
     return (
-      <div style={S.empty}>
-        <div style={S.emptyIcon}>
+      <div className="wk-empty">
+        <div className="wk-empty-icon">
           <SportIcon name="barbell" color="var(--accent)" size={30} />
         </div>
         <strong style={{ color: 'var(--text)' }}>No workouts yet.</strong>
@@ -2215,9 +2212,9 @@ function LogTab({ entries, onDelete, onEdit }) {
           : new Date(`${group.date}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
         return (
           <div key={group.date}>
-            <div style={S.sessionLabel}>
-              <span style={S.sessionDate}>{dateLabel}</span>
-              <span style={S.sessionSpan}>{group.entries.length} entr{group.entries.length === 1 ? 'y' : 'ies'}</span>
+            <div className="wk-session-label">
+              <span className="wk-session-date">{dateLabel}</span>
+              <span className="wk-session-span">{group.entries.length} entr{group.entries.length === 1 ? 'y' : 'ies'}</span>
             </div>
             {group.entries.map((e) => (
               <EntryCard key={e.id} entry={e} onDelete={onDelete} onEdit={onEdit} />
@@ -2256,7 +2253,7 @@ function Heatmap({ entries }) {
   const W = 53 * (cell + gap), H = 7 * (cell + gap)
   const count = days.size
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={S.heatmap} preserveAspectRatio="xMidYMid meet"
+    <svg viewBox={`0 0 ${W} ${H}`} className="wk-heatmap" preserveAspectRatio="xMidYMid meet"
       role="img" aria-label={`Activity heatmap: ${count} active day${count === 1 ? '' : 's'} in the last 53 weeks`}>
       {weeks.map((week, wi) => week.map((d, di) => (
         <rect key={`${wi}-${di}`}
@@ -2393,7 +2390,7 @@ function Sparkline({ points, color, label }) {
   const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(vals[i]).toFixed(1)}`).join(' ')
   const area = n > 1 ? `${line} L${x(n - 1).toFixed(1)},${H - padBottom} L${x(0).toFixed(1)},${H - padBottom} Z` : ''
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}
+    <svg viewBox={`0 0 ${W} ${H}`} className="wk-sparkline"
       role="img" aria-label={`${label || 'Trend'} across ${n} session${n === 1 ? '' : 's'}`}>
       {area && <path d={area} fill={color} opacity={0.13} />}
       {n > 1 && <path d={line} fill="none" stroke={color} strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />}
@@ -2506,69 +2503,69 @@ function ExerciseDetailSheet({ detail, onClose }) {
     : ''
 
   return (
-    <div style={S.sheetScrim} onClick={onClose} role="presentation">
-      <div style={S.sheet} onClick={(e) => e.stopPropagation()}
+    <div className="wk-sheet-scrim" onClick={onClose} role="presentation">
+      <div className="wk-sheet" onClick={(e) => e.stopPropagation()}
         role="dialog" aria-modal="true" aria-label={`${detail.activity} details`}>
-        <div style={S.sheetHead}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-            <div style={S.entryIcon(detail.color)} aria-hidden>
+        <div className="wk-sheet-head">
+          <div className="wk-sheet-head-brand">
+            <div className="wk-entry-icon" style={{ background: `${detail.color}22`, border: `1px solid ${detail.color}55` }} aria-hidden>
               <SportIcon name={detail.icon} color={detail.color} />
             </div>
             <div style={{ minWidth: 0 }}>
-              <h3 style={S.sheetTitle}>{detail.activity}</h3>
-              <p style={S.sheetSub}>
+              <h3 className="wk-sheet-title">{detail.activity}</h3>
+              <p className="wk-sheet-sub">
                 {CATEGORIES[detail.category]?.label || detail.category} · {detail.sessionCount} session{detail.sessionCount === 1 ? '' : 's'}{range ? ` · ${range}` : ''}
               </p>
             </div>
           </div>
-          <button style={S.iconBtn('var(--muted)')} onClick={onClose} aria-label="Close" title="Close">×</button>
+          <button className="wk-icon-btn" onClick={onClose} aria-label="Close" title="Close">×</button>
         </div>
 
-        <div style={S.sheetBody}>
-          <div style={S.recGrid}>
+        <div className="wk-sheet-body">
+          <div className="wk-rec-grid">
             {tiles.map((t) => (
-              <div key={t.label} style={S.recTile}>
-                <div style={S.recLabel}>{t.label}</div>
-                <div style={S.recValue}>{t.value}</div>
+              <div key={t.label} className="wk-rec-tile">
+                <div className="wk-rec-label">{t.label}</div>
+                <div className="wk-rec-value">{t.value}</div>
               </div>
             ))}
           </div>
 
           {trend && (
-            <div style={{ ...S.chartCard, marginTop: '14px' }}>
-              <h3 style={S.chartTitle}>{trend.label} over time</h3>
+            <div className="wk-chart-card is-nested">
+              <h3 className="wk-chart-title">{trend.label} over time</h3>
               {detail.points.length >= 2 ? (
                 <>
                   <Sparkline points={trend.series} color={detail.color} label={trend.label} />
-                  <div style={S.trendMeta}>
+                  <div className="wk-trend-meta">
                     <span>{shortDate(trend.series[0].ts)} · {trend.fmt(trend.series[0].value)}</span>
                     <span>{shortDate(trend.series[trend.series.length - 1].ts)} · {trend.fmt(trend.series[trend.series.length - 1].value)}</span>
                   </div>
                 </>
               ) : (
-                <p style={S.chartSub}>Log this {detail.family === 'strength' ? 'lift' : 'activity'} again to see a trend.</p>
+                <p className="wk-chart-sub">Log this {detail.family === 'strength' ? 'lift' : 'activity'} again to see a trend.</p>
               )}
             </div>
           )}
 
           {detail.setRecords.length > 0 && (
-            <div style={{ ...S.chartCard, marginTop: '14px' }}>
-              <h3 style={S.chartTitle}>Set records</h3>
-              <p style={S.chartSub}>Best weight at each rep count.</p>
-              <table style={S.prTable}>
+            <div className="wk-chart-card is-nested">
+              <h3 className="wk-chart-title">Set records</h3>
+              <p className="wk-chart-sub">Best weight at each rep count.</p>
+              <table className="wk-pr-table">
                 <thead>
                   <tr>
-                    <th style={S.prTh}>Reps</th>
-                    <th style={{ ...S.prTh, textAlign: 'right' }}>Best weight</th>
-                    <th style={{ ...S.prTh, textAlign: 'right' }}>e1RM</th>
+                    <th className="wk-pr-th">Reps</th>
+                    <th className="wk-pr-th is-right">Best weight</th>
+                    <th className="wk-pr-th is-right">e1RM</th>
                   </tr>
                 </thead>
                 <tbody>
                   {detail.setRecords.map((s) => (
                     <tr key={s.reps}>
-                      <td style={S.prTd}>{s.reps}</td>
-                      <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtWeight(s.weight_kg, s.unit)}</td>
-                      <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtWeight(s.e1rm, s.unit)}</td>
+                      <td className="wk-pr-td">{s.reps}</td>
+                      <td className="wk-pr-td is-right">{fmtWeight(s.weight_kg, s.unit)}</td>
+                      <td className="wk-pr-td is-right">{fmtWeight(s.e1rm, s.unit)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2576,14 +2573,14 @@ function ExerciseDetailSheet({ detail, onClose }) {
             </div>
           )}
 
-          <div style={{ ...S.chartCard, marginTop: '14px', marginBottom: 0 }}>
-            <h3 style={S.chartTitle}>History</h3>
-            <p style={S.chartSub}>Every session, newest first.</p>
-            <div style={S.histList}>
+          <div className="wk-chart-card is-last">
+            <h3 className="wk-chart-title">History</h3>
+            <p className="wk-chart-sub">Every session, newest first.</p>
+            <div className="wk-hist-list">
               {history.map((p, i) => (
-                <div key={`${p.ts}-${i}`} style={{ ...S.histRow, ...(i === history.length - 1 ? { borderBottom: 'none' } : null) }}>
-                  <span style={S.histDate}>{new Date(p.ts).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</span>
-                  <span style={S.histSummary}>{detailHistorySummary(p, detail.family)}</span>
+                <div key={`${p.ts}-${i}`} className={`wk-hist-row${i === history.length - 1 ? ' is-last' : ''}`}>
+                  <span className="wk-hist-date">{new Date(p.ts).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                  <span className="wk-hist-summary">{detailHistorySummary(p, detail.family)}</span>
                 </div>
               ))}
             </div>
@@ -2611,17 +2608,17 @@ function CategoryVolumeBars({ weeks }) {
     .sort((a, b) => b.total - a.total)
   const max = Math.max(0, ...rows.map((r) => r.total))
   if (rows.length === 0 || max <= 0) {
-    return <div style={{ ...S.empty, padding: '18px 8px' }}>No numeric volume this week yet.</div>
+    return <div className="wk-empty is-inline">No numeric volume this week yet.</div>
   }
   return (
-    <div style={S.barList}>
+    <div className="wk-bar-list">
       {rows.map((row) => (
-        <div key={row.category} style={S.barRow}>
-          <span style={S.barLabel}>{row.label}</span>
-          <div style={S.barTrack}>
-            <div style={S.barFill(row.color, (row.total / max) * 100)} />
+        <div key={row.category} className="wk-bar-row">
+          <span className="wk-bar-label">{row.label}</span>
+          <div className="wk-bar-track">
+            <div className="wk-bar-fill" style={{ width: `${Math.max(3, Math.min(100, (row.total / max) * 100))}%`, background: row.color }} />
           </div>
-          <span style={{ ...S.barLabel, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.total}</span>
+          <span className="wk-bar-label is-right">{row.total}</span>
         </div>
       ))}
     </div>
@@ -2630,10 +2627,10 @@ function CategoryVolumeBars({ weeks }) {
 
 function CategoryStats({ stats }) {
   if (stats.length === 0) {
-    return <div style={{ ...S.empty, padding: '18px 8px' }}>No category data yet.</div>
+    return <div className="wk-empty is-inline">No category data yet.</div>
   }
   return (
-    <div style={S.statGrid}>
+    <div className="wk-stat-grid">
       {stats.map((row) => {
         const fam = categoryFamily(row.category)
         const volume = fam === 'strength'
@@ -2642,13 +2639,13 @@ function CategoryStats({ stats }) {
             ? `${Math.round(row.distanceKm * 10) / 10} km`
             : `${Math.round(row.durationMin)} min`
         return (
-          <div key={row.category} style={S.statTile}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div key={row.category} className="wk-stat-tile">
+            <div className="wk-stat-head">
               <SportIcon name={CATEGORIES[row.category].icon} color={row.color} size={18} />
-              <span style={S.statLabel}>{row.label}</span>
+              <span className="wk-stat-label">{row.label}</span>
             </div>
-            <div style={S.statValue}>{volume}</div>
-            <div style={S.statLabel}>{row.sessions} session{row.sessions === 1 ? '' : 's'} · {row.entries} entr{row.entries === 1 ? 'y' : 'ies'}</div>
+            <div className="wk-stat-value">{volume}</div>
+            <div className="wk-stat-label">{row.sessions} session{row.sessions === 1 ? '' : 's'} · {row.entries} entr{row.entries === 1 ? 'y' : 'ies'}</div>
           </div>
         )
       })}
@@ -2659,10 +2656,10 @@ function CategoryStats({ stats }) {
 // A tappable exercise name + icon that opens the per-exercise detail sheet.
 function ExerciseLink({ icon, color, activity, onOpen }) {
   return (
-    <button type="button" style={S.exLink} onClick={onOpen} aria-label={`${activity} details`}>
+    <button type="button" className="wk-ex-link" onClick={onOpen} aria-label={`${activity} details`}>
       <SportIcon name={icon} color={color} size={16} />
       {activity}
-      <span style={S.exChevron} aria-hidden>›</span>
+      <span className="wk-ex-chevron" aria-hidden>›</span>
     </button>
   )
 }
@@ -2683,8 +2680,8 @@ function InsightsTab({ entries }) {
 
   if (entries.length === 0) {
     return (
-      <div style={S.empty}>
-        <div style={S.emptyIcon}>
+      <div className="wk-empty">
+        <div className="wk-empty-icon">
           <SportIcon name="heartbeat" color="var(--accent)" size={30} />
         </div>
         Log a few activities and your weekly volume, category stats, PRs, and streak will fill in here.
@@ -2694,48 +2691,48 @@ function InsightsTab({ entries }) {
 
   return (
     <div>
-      <div style={S.chartCard}>
-        <h3 style={S.chartTitle}>Current streak</h3>
-        <p style={S.chartSub}>Consecutive days with at least one logged activity.</p>
-        <div style={{ fontSize: '34px', fontWeight: 800, color: 'var(--accent)' }}>
-          {streak} <span style={{ fontSize: '15px', fontWeight: 600, color: 'var(--muted)' }}>day{streak === 1 ? '' : 's'}</span>
+      <div className="wk-chart-card">
+        <h3 className="wk-chart-title">Current streak</h3>
+        <p className="wk-chart-sub">Consecutive days with at least one logged activity.</p>
+        <div className="wk-streak-value">
+          {streak} <span className="wk-streak-unit">day{streak === 1 ? '' : 's'}</span>
         </div>
         <Heatmap entries={entries} />
       </div>
 
-      <div style={S.chartCard}>
-        <h3 style={S.chartTitle}>Weekly volume</h3>
-        <p style={S.chartSub}>Strength = kg-reps, cardio = km, other = minutes across the last 6 weeks.</p>
+      <div className="wk-chart-card">
+        <h3 className="wk-chart-title">Weekly volume</h3>
+        <p className="wk-chart-sub">Strength = kg-reps, cardio = km, other = minutes across the last 6 weeks.</p>
         <CategoryVolumeBars weeks={weeks} />
       </div>
 
-      <div style={S.chartCard}>
-        <h3 style={S.chartTitle}>Category stats</h3>
-        <p style={S.chartSub}>Sessions and useful totals by activity type.</p>
+      <div className="wk-chart-card">
+        <h3 className="wk-chart-title">Category stats</h3>
+        <p className="wk-chart-sub">Sessions and useful totals by activity type.</p>
         <CategoryStats stats={stats} />
       </div>
 
       {exercises.length > 0 && (
-        <div style={S.chartCard}>
-          <h3 style={S.chartTitle}>Exercises</h3>
-          <p style={S.chartSub}>Tap any exercise for its trend, records, and full history.</p>
-          <table style={S.prTable}>
+        <div className="wk-chart-card">
+          <h3 className="wk-chart-title">Exercises</h3>
+          <p className="wk-chart-sub">Tap any exercise for its trend, records, and full history.</p>
+          <table className="wk-pr-table">
             <thead>
               <tr>
-                <th style={S.prTh}>Exercise</th>
-                <th style={{ ...S.prTh, textAlign: 'right' }}>Best</th>
-                <th style={{ ...S.prTh, textAlign: 'right' }}>Sessions</th>
+                <th className="wk-pr-th">Exercise</th>
+                <th className="wk-pr-th is-right">Best</th>
+                <th className="wk-pr-th is-right">Sessions</th>
               </tr>
             </thead>
             <tbody>
               {exercises.slice(0, 8).map((row) => (
                 <tr key={row.key}>
-                  <td style={S.prTd}>
+                  <td className="wk-pr-td">
                     <ExerciseLink icon={row.icon} color={row.color} activity={row.activity}
                       onOpen={() => openEx(row.category, row.activity)} />
                   </td>
-                  <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.best}</td>
-                  <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.sessions}</td>
+                  <td className="wk-pr-td is-right">{row.best}</td>
+                  <td className="wk-pr-td is-right">{row.sessions}</td>
                 </tr>
               ))}
             </tbody>
@@ -2744,29 +2741,29 @@ function InsightsTab({ entries }) {
       )}
 
       {prs.length > 0 && (
-        <div style={S.chartCard}>
-          <h3 style={S.chartTitle}>Strength PRs</h3>
-          <p style={S.chartSub}>Ranked by estimated 1-rep max (Epley). Tap a lift for its trend.</p>
-          <table style={S.prTable}>
+        <div className="wk-chart-card">
+          <h3 className="wk-chart-title">Strength PRs</h3>
+          <p className="wk-chart-sub">Ranked by estimated 1-rep max (Epley). Tap a lift for its trend.</p>
+          <table className="wk-pr-table">
             <thead>
               <tr>
-                <th style={S.prTh}>Lift</th>
-                <th style={{ ...S.prTh, textAlign: 'right' }}>Top set</th>
-                <th style={{ ...S.prTh, textAlign: 'right' }}>e1RM</th>
+                <th className="wk-pr-th">Lift</th>
+                <th className="wk-pr-th is-right">Top set</th>
+                <th className="wk-pr-th is-right">e1RM</th>
               </tr>
             </thead>
             <tbody>
               {prs.map((p) => (
                 <tr key={p.activity}>
-                  <td style={S.prTd}>
-                    <button type="button" style={S.exLink} onClick={() => openEx('strength', p.activity)} aria-label={`${p.activity} details`}>
-                      {p.activity}<span style={S.exChevron} aria-hidden>›</span>
+                  <td className="wk-pr-td">
+                    <button type="button" className="wk-ex-link" onClick={() => openEx('strength', p.activity)} aria-label={`${p.activity} details`}>
+                      {p.activity}<span className="wk-ex-chevron" aria-hidden>›</span>
                     </button>
                   </td>
-                  <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  <td className="wk-pr-td is-right">
                     {fromKg(p.weight_kg, p.unit)}{p.unit} × {p.reps}
                   </td>
-                  <td style={{ ...S.prTd, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                  <td className="wk-pr-td is-right is-strong">
                     {fromKg(p.e1rm, p.unit)}{p.unit}
                   </td>
                 </tr>
@@ -2777,29 +2774,29 @@ function InsightsTab({ entries }) {
       )}
 
       {cardio.length > 0 && (
-        <div style={S.chartCard}>
-          <h3 style={S.chartTitle}>Cardio bests</h3>
-          <p style={S.chartSub}>Longest distance and duration per activity. Tap one for its trend.</p>
-          <table style={S.prTable}>
+        <div className="wk-chart-card">
+          <h3 className="wk-chart-title">Cardio bests</h3>
+          <p className="wk-chart-sub">Longest distance and duration per activity. Tap one for its trend.</p>
+          <table className="wk-pr-table">
             <thead>
               <tr>
-                <th style={S.prTh}>Activity</th>
-                <th style={{ ...S.prTh, textAlign: 'right' }}>Distance</th>
-                <th style={{ ...S.prTh, textAlign: 'right' }}>Duration</th>
+                <th className="wk-pr-th">Activity</th>
+                <th className="wk-pr-th is-right">Distance</th>
+                <th className="wk-pr-th is-right">Duration</th>
               </tr>
             </thead>
             <tbody>
               {cardio.map((c) => (
                 <tr key={c.activity}>
-                  <td style={S.prTd}>
-                    <button type="button" style={S.exLink} onClick={() => openEx(c.category, c.activity)} aria-label={`${c.activity} details`}>
-                      {c.activity}<span style={S.exChevron} aria-hidden>›</span>
+                  <td className="wk-pr-td">
+                    <button type="button" className="wk-ex-link" onClick={() => openEx(c.category, c.activity)} aria-label={`${c.activity} details`}>
+                      {c.activity}<span className="wk-ex-chevron" aria-hidden>›</span>
                     </button>
                   </td>
-                  <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  <td className="wk-pr-td is-right">
                     {c.maxDistance_m ? fmtDistance(c.maxDistance_m) : '—'}
                   </td>
-                  <td style={{ ...S.prTd, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  <td className="wk-pr-td is-right">
                     {c.maxDuration_s ? fmtDuration(c.maxDuration_s) : '—'}
                   </td>
                 </tr>
@@ -2822,8 +2819,8 @@ function AllTab({ entries, onDelete, onEdit }) {
   const groups = useMemo(() => groupEntriesByDate(entries), [entries])
   if (entries.length === 0) {
     return (
-      <div style={S.empty}>
-        <div style={S.emptyIcon}>
+      <div className="wk-empty">
+        <div className="wk-empty-icon">
           <SportIcon name="sparkles" color="var(--accent)" size={30} />
         </div>
         No entries yet.
@@ -2833,16 +2830,16 @@ function AllTab({ entries, onDelete, onEdit }) {
   const todayIso = localDate()
   return (
     <div>
-      <p style={S.cardSub}>{entries.length} total {entries.length === 1 ? 'entry' : 'entries'}.</p>
+      <p className="wk-card-sub">{entries.length} total {entries.length === 1 ? 'entry' : 'entries'}.</p>
       {groups.map((group) => {
         const dateLabel = group.date === todayIso
           ? 'Today'
           : new Date(`${group.date}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
         return (
           <div key={group.date}>
-            <div style={S.sessionLabel}>
-              <span style={S.sessionDate}>{dateLabel}</span>
-              <span style={S.sessionSpan}>{group.entries.length} entr{group.entries.length === 1 ? 'y' : 'ies'}</span>
+            <div className="wk-session-label">
+              <span className="wk-session-date">{dateLabel}</span>
+              <span className="wk-session-span">{group.entries.length} entr{group.entries.length === 1 ? 'y' : 'ies'}</span>
             </div>
             {group.entries.map((e) => (
               <EntryCard key={e.id} entry={e} onDelete={onDelete} onEdit={onEdit} />
@@ -3103,7 +3100,7 @@ export default function App({ appId, token }) {
   useEffect(() => () => closeNestedNav(), [closeNestedNav])
 
   if (bootStatus === 'loading') {
-    return <div style={S.root}><div style={S.loading}>Loading…</div></div>
+    return <div className="wk-root"><style>{CSS}</style><div className="wk-loading">Loading…</div></div>
   }
 
   const subtitle = tab === 'log' ? 'Log anything.'
@@ -3111,35 +3108,36 @@ export default function App({ appId, token }) {
     : 'Everything you\'ve logged.'
 
   return (
-    <div style={{ ...S.root, position: 'relative' }}>
-      <div style={S.header}>
+    <div className="wk-root">
+      <style>{CSS}</style>
+      <div className="wk-header">
         <div>
-          <h1 style={S.title}>Workout</h1>
-          <p style={S.subtitle}>{subtitle}</p>
+          <h1 className="wk-title">Workout</h1>
+          <p className="wk-subtitle">{subtitle}</p>
         </div>
         <SyncPill status={syncStatus} />
       </div>
 
       {!editingEntry && (
-        <nav style={S.tabbar} role="tablist" aria-label="Activity tabs">
-          <button style={S.tabBtn(tab === 'log')} onClick={() => setTab('log')}
+        <nav className="wk-tabbar" role="tablist" aria-label="Activity tabs">
+          <button className={`wk-tab-btn${tab === 'log' ? ' is-active' : ''}`} onClick={() => setTab('log')}
             role="tab" aria-selected={tab === 'log'} aria-label="Log">
-            <span style={S.tabIcon} aria-hidden>✎</span>Log
+            <span className="wk-tab-icon" aria-hidden>✎</span>Log
           </button>
-          <button style={S.tabBtn(tab === 'insights')} onClick={() => setTab('insights')}
+          <button className={`wk-tab-btn${tab === 'insights' ? ' is-active' : ''}`} onClick={() => setTab('insights')}
             role="tab" aria-selected={tab === 'insights'} aria-label="Insights">
-            <span style={S.tabIcon} aria-hidden>▦</span>Insights
+            <span className="wk-tab-icon" aria-hidden>▦</span>Insights
           </button>
-          <button style={S.tabBtn(tab === 'all')} onClick={() => setTab('all')}
+          <button className={`wk-tab-btn${tab === 'all' ? ' is-active' : ''}`} onClick={() => setTab('all')}
             role="tab" aria-selected={tab === 'all'} aria-label="All entries">
-            <span style={S.tabIcon} aria-hidden>≣</span>All
+            <span className="wk-tab-icon" aria-hidden>≣</span>All
           </button>
         </nav>
       )}
 
       <div ref={bodyRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={S.scroll}>
-          <div style={S.inner}>
+        <div className="wk-scroll">
+          <div className="wk-inner">
             {editingEntry ? (
               <ConfirmCard
                 draft={draftFromStoredEntry(editingEntry)}
@@ -3188,8 +3186,7 @@ export default function App({ appId, token }) {
         {!editingEntry && tab === 'log' && (
           <>
             <div
-              style={S.chatResizer}
-              className="workout-chat-resizer"
+              className="workout-chat-resizer wk-chat-resizer"
               role="separator"
               aria-label="Resize workout chat"
               aria-orientation="horizontal"
@@ -3200,7 +3197,7 @@ export default function App({ appId, token }) {
               onPointerDown={beginChatResize}
               onKeyDown={handleResizeKey}
             >
-              <span style={S.chatResizerBar} aria-hidden />
+              <span className="wk-chat-resizer-bar" aria-hidden />
             </div>
             <AgentChatPanel
               appId={appId}
