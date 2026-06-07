@@ -1,8 +1,8 @@
 {
   "id": "gym",
   "name": "Workout",
-  "version": "2.3.4",
-  "description": "Chat-first embedded-agent training log. Tell the Workout agent what you did — \"deadlift 3x5 at 120kg, swam 40 minutes\" — and it builds a current session draft, asks for required missing details, then commits on Finish session. Uses the real Möbius embedded chat with model picker, plus a per-exercise drill-down (estimated-1RM/pace trend, records, set-records, full history), strength PRs, cardio bests, weekly volume, category stats, and a streak heatmap.",
+  "version": "2.3.5",
+  "description": "Chat-first embedded-agent training log. Tell the Workout agent what you did \u2014 \"deadlift 3x5 at 120kg, swam 40 minutes\" \u2014 and it builds a current session draft, asks for required missing details, then commits on Finish session. Uses the real M\u00f6bius embedded chat with model picker, plus a per-exercise drill-down (estimated-1RM/pace trend, records, set-records, full history), strength PRs, cardio bests, weekly volume, category stats, and a streak heatmap.",
   "author": "mobius-os",
   "license": "MIT",
   "homepage": "https://github.com/mobius-os/app-workout",
@@ -20,5 +20,6 @@
     ],
     "esm_deps": []
   },
-  "storage_seeds": {}
+  "storage_seeds": {},
+  "embeds_agent": true
 }
