@@ -3,7 +3,7 @@
   "previous_id": "gym",
   "name": "Workout",
   "version": "2.3.7",
-  "description": "Log your workouts by chatting \u2014 tell it what you lifted or ran and it tracks your PRs, trends, and streaks.",
+  "description": "Log your workouts by chatting. Tell it what you lifted or ran and it tracks your PRs, trends, and streaks.",
   "author": "mobius-os",
   "license": "MIT",
   "homepage": "https://github.com/mobius-os/app-workout",
