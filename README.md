@@ -2,6 +2,10 @@
 
 A natural-language activity logger for [Möbius](https://github.com/mobius-os). Type what you did — `3×5 deadlift at 100kg`, `ran 5k in 24 min`, `hiked 8h in Hawaii`, `played football for an hour` — and the embedded agent builds a current session, asks for required missing details, auto-categorizes activities, and commits the session when you press Finish session. Built for the gym, generalized to any activity.
 
+## Manifest id
+
+The manifest `id` in `mobius.json` is `gym`, even though the repo and display name are `Workout`. This divergence is intentional, not a bug. The `id` is the canonical install-identity key — installs dedup on `#manifest-id=gym`, and the on-disk storage slug is `/data/apps/gym`. Renaming the `id` to `workout` would mint a *duplicate* install rather than rename the existing one, so it is deliberately kept as `gym`.
+
 ## Install
 
 ### Via the App Store (recommended)
