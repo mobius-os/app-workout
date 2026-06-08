@@ -2067,7 +2067,7 @@ function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height }) 
       persist: 'chat_id.json',
       title: 'Workout',
       systemPrompt,
-      picker: false,
+      picker: true,
       onTurnDone: () => { onEntriesRef.current?.() },
       onError: ({ error: chatError }) => {
         setError(typeof chatError === 'string' ? chatError : 'Embedded chat reported an error.')
@@ -2182,7 +2182,7 @@ function CurrentSessionPanel({ session, onFinish, finishing = false }) {
           {entries.map((entry) => <SessionDraftCard key={entry.id} entry={entry} />)}
         </div>
       ) : (
-        <div className="wk-current-session-empty">Tell the agent what you did.</div>
+        <div className="wk-current-session-empty">No activities in this session yet.</div>
       )}
       {missing.length > 0 && (
         <p className="wk-current-session-missing">Missing: {missing.join(', ')}.</p>
