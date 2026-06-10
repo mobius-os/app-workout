@@ -1283,12 +1283,14 @@ const CSS = `
   height: 100%; width: 100%; max-width: 100%;
   overflow: hidden;
   background: var(--bg); color: var(--text); font-family: var(--font);
+  -webkit-tap-highlight-color: transparent;
 }
 .wk-scroll {
   flex: 1; min-height: 0;
   overflow-y: auto; overflow-x: hidden;
   padding: 14px 16px 16px;
   word-break: break-word; overflow-wrap: anywhere;
+  overscroll-behavior: contain;
 }
 /* /mobius-ui:Root */
 
@@ -1302,8 +1304,8 @@ const CSS = `
   padding: 12px 16px 10px;
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
-.wk-title { margin: 0; font-size: 18px; font-weight: 760; letter-spacing: 0; }
-.wk-subtitle { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.wk-title { margin: 0; font-size: 18px; font-weight: 760; letter-spacing: 0; user-select: none; }
+.wk-subtitle { margin: 2px 0 0; font-size: 12px; color: var(--muted); user-select: none; }
 /* /mobius-ui:Header */
 
 /* mobius-ui:Segmented v1 — keep in sync; library candidate. Diverge below the marker only. */
@@ -1318,10 +1320,14 @@ const CSS = `
   border: 1px solid transparent; border-radius: 8px;
   background: transparent; color: var(--muted);
   font-family: var(--font); font-size: 12px; font-weight: 700; cursor: pointer;
+  touch-action: manipulation; user-select: none;
 }
 .wk-tab-btn.is-active {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--text);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wk-tab-btn:active { opacity: 0.75; }
 }
 .wk-tab-icon { display: flex; line-height: 1; }
 /* /mobius-ui:Segmented */
@@ -1379,12 +1385,22 @@ const CSS = `
   width: 100%; min-height: 48px; padding: 14px 16px; border-radius: 12px;
   border: none; background: var(--accent); color: #fff;
   font-family: var(--font); font-size: 15px; font-weight: 600; cursor: pointer;
+  touch-action: manipulation; user-select: none;
+}
+.wk-btn-primary:disabled { pointer-events: none; opacity: 0.6; }
+@media (prefers-reduced-motion: no-preference) {
+  .wk-btn-primary:not(:disabled):active { opacity: 0.82; transform: scale(0.98); }
 }
 .wk-btn-secondary {
   min-height: 44px; padding: 12px 14px; border-radius: 10px;
   border: 1px solid var(--border); background: var(--surface2, var(--surface));
   color: var(--text); font-family: var(--font);
   font-size: 14px; font-weight: 600; cursor: pointer;
+  touch-action: manipulation; user-select: none;
+}
+.wk-btn-secondary:disabled { pointer-events: none; opacity: 0.6; }
+@media (prefers-reduced-motion: no-preference) {
+  .wk-btn-secondary:not(:disabled):active { opacity: 0.8; transform: scale(0.97); }
 }
 .wk-btn-secondary.is-block { width: 100%; }
 .wk-btn-secondary.is-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
@@ -1392,6 +1408,11 @@ const CSS = `
   min-height: 44px; padding: 10px 12px; border-radius: 8px;
   border: none; background: transparent; color: var(--accent);
   font-family: var(--font); font-size: 13px; font-weight: 600; cursor: pointer;
+  touch-action: manipulation; user-select: none;
+}
+.wk-btn-ghost:disabled { pointer-events: none; opacity: 0.55; }
+@media (prefers-reduced-motion: no-preference) {
+  .wk-btn-ghost:not(:disabled):active { opacity: 0.75; }
 }
 .wk-btn-ghost.is-muted { color: var(--muted); }
 .wk-btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -1412,15 +1433,20 @@ const CSS = `
 .wk-entry-body { flex: 1; min-width: 0; }
 .wk-entry-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .wk-entry-name { margin: 0; font-size: 15px; font-weight: 760; letter-spacing: 0; }
-.wk-entry-time { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.wk-entry-time { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .wk-entry-meta { margin: 5px 0 0; font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; }
-.wk-entry-raw { margin: 6px 0 0; font-size: 11px; color: var(--muted); font-style: italic; }
+.wk-entry-raw { margin: 6px 0 0; font-size: 12px; color: var(--muted); font-style: italic; }
 .wk-entry-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .wk-icon-btn {
   width: 32px; height: 32px; border-radius: 8px;
   display: inline-flex; align-items: center; justify-content: center; line-height: 1;
   border: none; background: transparent; color: var(--muted);
   font-family: var(--font); font-size: 14px; font-weight: 800; cursor: pointer;
+  touch-action: manipulation; user-select: none;
+}
+.wk-icon-btn:disabled { pointer-events: none; opacity: 0.5; }
+@media (prefers-reduced-motion: no-preference) {
+  .wk-icon-btn:not(:disabled):active { opacity: 0.7; transform: scale(0.9); }
 }
 .wk-icon-btn.is-accent { color: var(--accent); }
 
@@ -1433,8 +1459,8 @@ const CSS = `
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 12px; border-bottom: 1px solid var(--border);
 }
-.wk-current-session-title { margin: 0; font-size: 14px; line-height: 1.25; font-weight: 800; letter-spacing: 0; }
-.wk-current-session-sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.wk-current-session-title { margin: 0; font-size: 14px; line-height: 1.25; font-weight: 800; letter-spacing: 0; user-select: none; }
+.wk-current-session-sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; user-select: none; }
 .wk-current-session-list { padding: 8px 10px 2px; }
 .wk-current-session-empty { padding: 16px 12px; color: var(--muted); font-size: 13px; }
 .wk-current-session-missing { margin: 0; padding: 0 12px 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
@@ -1443,16 +1469,21 @@ const CSS = `
   border: none; background: var(--accent); color: #fff;
   font-family: var(--font); font-size: 13px; font-weight: 800;
   white-space: nowrap; cursor: pointer;
+  touch-action: manipulation; user-select: none;
 }
-.wk-finish-btn:disabled { opacity: 0.52; cursor: not-allowed; }
+.wk-finish-btn:disabled { opacity: 0.52; cursor: not-allowed; pointer-events: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .wk-finish-btn:not(:disabled):active { opacity: 0.82; transform: scale(0.97); }
+}
 
 /* Date-group label rows in the log / all tabs — app-specific. */
 .wk-session-label {
   display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
   margin: 20px 0 9px; font-size: 12px; color: var(--muted); font-weight: 700;
+  user-select: none;
 }
-.wk-session-date { color: var(--text); font-size: 13px; font-weight: 800; letter-spacing: 0; }
-.wk-session-span { font-size: 11px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.wk-session-date { color: var(--text); font-size: 13px; font-weight: 800; letter-spacing: 0; user-select: none; }
+.wk-session-span { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; }
 
 /* mobius-ui:Input v1 — keep in sync; library candidate. Diverge below the marker only. */
 .wk-input {
@@ -1478,6 +1509,10 @@ const CSS = `
   min-height: 44px; padding: 8px 12px; border-radius: 999px;
   border: 1px solid var(--border); background: transparent; color: var(--muted);
   font-family: var(--font); font-size: 13px; font-weight: 600; cursor: pointer;
+  touch-action: manipulation; user-select: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wk-chip:active { opacity: 0.8; transform: scale(0.96); }
 }
 
 /* Chart / insight cards — app-specific. */
@@ -1487,8 +1522,8 @@ const CSS = `
 }
 .wk-chart-card.is-nested { margin-top: 14px; }
 .wk-chart-card.is-last { margin-top: 14px; margin-bottom: 0; }
-.wk-chart-title { margin: 0 0 2px; font-size: 14px; font-weight: 700; }
-.wk-chart-sub { margin: 0 0 10px; font-size: 11px; color: var(--muted); }
+.wk-chart-title { margin: 0 0 2px; font-size: 14px; font-weight: 700; user-select: none; }
+.wk-chart-sub { margin: 0 0 10px; font-size: 12px; color: var(--muted); user-select: none; }
 .wk-streak-value { font-size: 34px; font-weight: 800; color: var(--accent); }
 .wk-streak-unit { font-size: 15px; font-weight: 600; color: var(--muted); }
 
@@ -1496,7 +1531,8 @@ const CSS = `
 .wk-pr-th {
   padding: 8px 6px; text-align: left; font-weight: 600; color: var(--muted);
   border-bottom: 1px solid var(--border);
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  user-select: none;
 }
 .wk-pr-th.is-right { text-align: right; }
 .wk-pr-td { padding: 10px 6px; border-bottom: 1px solid var(--border); }
@@ -1532,8 +1568,9 @@ const CSS = `
   width: 100%; max-width: 320px; padding: 20px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  overscroll-behavior: contain;
 }
-.wk-modal-title { margin: 0 0 6px; font-size: 16px; font-weight: 700; }
+.wk-modal-title { margin: 0 0 6px; font-size: 16px; font-weight: 700; user-select: none; }
 .wk-modal-body { margin: 0 0 16px; font-size: 13px; line-height: 1.5; color: var(--muted); }
 .wk-modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
 /* /mobius-ui:Sheet */
@@ -1541,8 +1578,9 @@ const CSS = `
 /* mobius-ui:SyncPill v1 — keep in sync; library candidate. */
 .wk-pill {
   padding: 4px 10px; border-radius: 999px;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.2px; white-space: nowrap;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.2px; white-space: nowrap;
   background: transparent; border: 1px solid var(--border); color: var(--muted);
+  user-select: none;
 }
 .wk-pill.is-pending { background: var(--surface2, var(--surface)); }
 .wk-pill.is-offline {
@@ -1570,7 +1608,7 @@ const CSS = `
 }
 .wk-stat-head { display: flex; align-items: center; gap: 8px; }
 .wk-stat-value { margin: 7px 0 2px; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
-.wk-stat-label { font-size: 11px; color: var(--muted); font-weight: 700; }
+.wk-stat-label { font-size: 12px; color: var(--muted); font-weight: 700; user-select: none; }
 
 /* A tappable exercise name (opens the per-exercise detail sheet). Renders as
    plain text but is a real <button> for keyboard + screen-reader access. */
@@ -1578,6 +1616,10 @@ const CSS = `
   display: inline-flex; align-items: center; gap: 7px;
   padding: 0; margin: 0; border: none; background: none;
   font: inherit; color: var(--text); font-weight: 700; cursor: pointer; text-align: left;
+  touch-action: manipulation; user-select: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wk-ex-link:active { opacity: 0.75; }
 }
 .wk-ex-chevron { margin-left: 2px; color: var(--muted); font-weight: 700; }
 
@@ -1600,9 +1642,9 @@ const CSS = `
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 14px 14px 12px; border-bottom: 1px solid var(--border);
 }
-.wk-sheet-title { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: 0; }
-.wk-sheet-sub { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
-.wk-sheet-body { padding: 14px; overflow-y: auto; }
+.wk-sheet-title { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: 0; user-select: none; }
+.wk-sheet-sub { margin: 2px 0 0; font-size: 12px; color: var(--muted); user-select: none; }
+.wk-sheet-body { padding: 14px; overflow-y: auto; overscroll-behavior: contain; }
 /* /mobius-ui:Sheet */
 
 .wk-sheet-head-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -1612,12 +1654,13 @@ const CSS = `
   padding: 10px; border: 1px solid var(--border); border-radius: 8px;
   background: color-mix(in srgb, var(--bg) 55%, transparent);
 }
-.wk-rec-label { font-size: 10.5px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+.wk-rec-label { font-size: 12px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; user-select: none; }
 .wk-rec-value { margin: 3px 0 0; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
 
 .wk-trend-meta {
   display: flex; justify-content: space-between; gap: 10px; margin-top: 4px;
-  font-size: 11px; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums;
+  font-size: 12px; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums;
+  user-select: none;
 }
 .wk-hist-list { display: flex; flex-direction: column; }
 .wk-hist-row {
