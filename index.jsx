@@ -1814,6 +1814,13 @@ function ConfirmCard({
   const [elevation, setElevation] = useState(draft.metrics?.elevation?.value ?? '')
   const [location, setLocation] = useState(draft.metrics?.location ?? '')
   const [note, setNote] = useState(draft.metrics?.note ?? '')
+  // Category change crossing a metric family clears the old family's inputs (a
+  // strength entry has sets; a cardio one has distance/duration; etc). Since
+  // handleCommit only reads the CURRENT family's fields, the old values would be
+  // dropped silently on save — so we confirm before clearing when the abandoned
+  // family actually holds entered data. pendingCategory holds the requested key
+  // while that confirm modal is open.
+  const [pendingCategory, setPendingCategory] = useState(null)
 
   const updateSet = (i, patch) =>
     setSets((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)))
@@ -1825,6 +1832,40 @@ function ConfirmCard({
     if (value === '' || value == null) return null
     const n = Number(value)
     return Number.isFinite(n) ? n : null
+  }
+
+  const familyHasData = (family) => {
+    if (family === 'strength') return sets.some((s) => s.weight !== '' || s.reps !== '')
+    if (family === 'cardio') return duration !== '' || distance !== '' || elevation !== '' || location !== ''
+    return duration !== '' || location !== '' || note !== ''
+  }
+  const clearFamilyFields = (family) => {
+    if (family === 'strength') {
+      setSets([{ weight: '', reps: '', unit: 'kg' }])
+    } else if (family === 'cardio') {
+      setDuration(''); setDistance(''); setElevation(''); setLocation('')
+    } else {
+      setDuration(''); setLocation(''); setNote('')
+    }
+  }
+  const applyCategory = (k) => {
+    const prevFam = categoryFamily(category)
+    const nextFam = categoryFamily(k)
+    if (nextFam !== prevFam) clearFamilyFields(prevFam)
+    setCategory(k)
+  }
+  // Same-family switches (e.g. running → cycling) reuse the same inputs, so they
+  // apply immediately. A cross-family switch only prompts when the abandoned
+  // family has data the user would lose; otherwise it switches silently.
+  const requestCategory = (k) => {
+    if (k === category) return
+    const prevFam = categoryFamily(category)
+    const nextFam = categoryFamily(k)
+    if (nextFam === prevFam || !familyHasData(prevFam)) {
+      applyCategory(k)
+      return
+    }
+    setPendingCategory(k)
   }
 
   const handleCommit = () => {
@@ -1905,7 +1946,7 @@ function ConfirmCard({
             <button
               key={k} className="wk-chip"
               style={active ? { borderColor: color, background: `${color}22`, color: 'var(--text)' } : undefined}
-              onClick={() => setCategory(k)}
+              onClick={() => requestCategory(k)}
               aria-label={`Category ${CATEGORIES[k].label}`}
               aria-pressed={active}
             >
@@ -2018,6 +2059,16 @@ function ConfirmCard({
       </button>
       <div className="wk-spacer-10" />
       <button className="wk-btn-secondary is-block" onClick={onCancel} aria-label="Discard entry">Discard</button>
+
+      {pendingCategory && (
+        <ConfirmModal
+          title={`Switch to ${CATEGORIES[pendingCategory].label}?`}
+          body={`${CATEGORIES[pendingCategory].label} logs different metrics, so the ${CATEGORIES[category].label.toLowerCase()} details you entered will be cleared.`}
+          confirmLabel="Switch and clear"
+          onConfirm={() => { applyCategory(pendingCategory); setPendingCategory(null) }}
+          onCancel={() => setPendingCategory(null)}
+        />
+      )}
     </div>
   )
 }
@@ -2949,8 +3000,17 @@ export default function App({ appId, token }) {
         return migrated
       }
     }
+    // A transient empty read (offline cache miss, a network blip, a half-written
+    // file) is indistinguishable from a genuinely-empty store. On the post-chat
+    // REFRESH path (no setReady) we already have a loaded list, so keep it rather
+    // than blanking the whole log on a momentary empty read. Only the initial
+    // boot (setReady) renders the real empty state.
+    if (!options.setReady) {
+      setEntries((prev) => (Array.isArray(prev) && prev.length > 0 ? prev : []))
+      return []
+    }
     setEntries([])
-    if (options.setReady) setBootStatus('ready')
+    setBootStatus('ready')
     return []
   }, [bumpSync, store])
 
@@ -3078,9 +3138,14 @@ export default function App({ appId, token }) {
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      // A touch drag can end with pointercancel (the browser claims the gesture)
+      // instead of pointerup. Without removing on cancel too, the pointermove
+      // listener leaks and keeps resizing the panel on every later touch.
+      window.removeEventListener('pointercancel', onUp)
     }
     window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp, { once: true })
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }, [])
 
   const handleResizeKey = useCallback((event) => {
