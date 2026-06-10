@@ -803,7 +803,7 @@ function categorySplit(entries) {
     .map(([category, count]) => ({
       category,
       label: CATEGORIES[category]?.label || category,
-      color: CATEGORIES[category]?.color || '#a1a1aa',
+      color: CATEGORIES[category]?.color || 'var(--muted)',
       count,
     }))
     .sort((a, b) => b.count - a.count)
@@ -1294,6 +1294,13 @@ const CSS = `
 }
 /* /mobius-ui:Root */
 
+/* mobius-ui:Focus v1 -- shared keyboard focus ring (WCAG 2.4.7); never bare outline:none */
+:where(button,a,input,textarea,select,summary,[role="button"],[tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* /mobius-ui:Focus */
+
 /* Web cap so the column doesn't sprawl on desktop while staying mobile-first. */
 .wk-inner { width: 100%; max-width: 720px; margin-left: auto; margin-right: auto; }
 
@@ -1301,7 +1308,7 @@ const CSS = `
 .wk-header {
   flex: 0 0 auto;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 12px 16px 10px;
+  padding: max(12px, env(safe-area-inset-top)) 16px 10px;
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .wk-title { margin: 0; font-size: 18px; font-weight: 760; letter-spacing: 0; user-select: none; }
@@ -1347,6 +1354,7 @@ const CSS = `
   max-height: calc(100% - 110px);
   display: flex; flex-direction: column;
   background: var(--bg);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 .wk-chat-resizer {
   flex: 0 0 9px;
@@ -1490,7 +1498,12 @@ const CSS = `
   display: block; width: 100%; box-sizing: border-box; min-height: 44px; padding: 12px;
   background: var(--surface2, var(--surface)); color: var(--text);
   border: 1px solid var(--border); border-radius: 10px;
-  outline: none; font-family: var(--font); font-size: 14px;
+  font-family: var(--font); font-size: 16px;
+}
+.wk-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .wk-input.is-auto { width: auto; }
 .wk-label { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
@@ -1680,6 +1693,17 @@ const CSS = `
 .wk-grid-metric { display: grid; grid-template-columns: 1fr 80px; gap: 8px; align-items: end; }
 .wk-btn-row-finish { justify-content: space-between; align-items: center; margin-top: 4px; }
 .wk-min44 { min-width: 44px; }
+
+/* mobius-ui:ReducedMotion v1 -- honor the OS reduce-motion setting */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+/* /mobius-ui:ReducedMotion */
 `
 
 
@@ -1966,12 +1990,12 @@ function ConfirmCard({
               <input
                 className="wk-input" type="number" inputMode="decimal" value={s.weight}
                 onChange={(e) => updateSet(i, { weight: e.target.value })}
-                aria-label={`Set ${i + 1} weight`} placeholder="n/a"
+                aria-label={`Set ${i + 1} weight`} placeholder="kg"
               />
               <input
                 className="wk-input" type="number" inputMode="numeric" value={s.reps}
                 onChange={(e) => updateSet(i, { reps: e.target.value })}
-                aria-label={`Set ${i + 1} reps`} placeholder="n/a"
+                aria-label={`Set ${i + 1} reps`} placeholder="reps"
               />
               <button
                 className="wk-btn-ghost is-muted wk-min44"
@@ -1998,7 +2022,7 @@ function ConfirmCard({
               <label className="wk-label">Duration</label>
               <input
                 className="wk-input" type="number" inputMode="decimal" value={duration}
-                onChange={(e) => setDuration(e.target.value)} aria-label="Duration" placeholder="n/a"
+                onChange={(e) => setDuration(e.target.value)} aria-label="Duration" placeholder="min"
               />
             </div>
             <select value={durationUnit} onChange={(e) => setDurationUnit(e.target.value)}
@@ -2016,7 +2040,7 @@ function ConfirmCard({
                   <label className="wk-label">Distance</label>
                   <input
                     className="wk-input" type="number" inputMode="decimal" value={distance}
-                    onChange={(e) => setDistance(e.target.value)} aria-label="Distance" placeholder="n/a"
+                    onChange={(e) => setDistance(e.target.value)} aria-label="Distance" placeholder="km"
                   />
                 </div>
                 <select value={distanceUnit} onChange={(e) => setDistanceUnit(e.target.value)}
@@ -2030,7 +2054,7 @@ function ConfirmCard({
               <label className="wk-label">Elevation gain (m)</label>
               <input
                 className="wk-input" type="number" inputMode="decimal" value={elevation}
-                onChange={(e) => setElevation(e.target.value)} aria-label="Elevation gain in metres" placeholder="n/a"
+                onChange={(e) => setElevation(e.target.value)} aria-label="Elevation gain in metres" placeholder="m"
               />
             </>
           )}
@@ -2697,7 +2721,7 @@ function CategoryVolumeBars({ weeks }) {
       category,
       total: Math.round(total * 10) / 10,
       label: CATEGORIES[category]?.label || category,
-      color: CATEGORIES[category]?.color || '#a1a1aa',
+      color: CATEGORIES[category]?.color || 'var(--muted)',
     }))
     .sort((a, b) => b.total - a.total)
   const max = Math.max(0, ...rows.map((r) => r.total))

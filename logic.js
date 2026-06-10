@@ -795,7 +795,7 @@ export function categorySplit(entries) {
     .map(([category, count]) => ({
       category,
       label: CATEGORIES[category]?.label || category,
-      color: CATEGORIES[category]?.color || '#a1a1aa',
+      color: CATEGORIES[category]?.color || 'var(--muted)',
       count,
     }))
     .sort((a, b) => b.count - a.count)
