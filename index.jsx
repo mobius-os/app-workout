@@ -3055,8 +3055,12 @@ export default function App({ appId, token }) {
     Promise.all([
       loadEntries({ allowMigration: true, setReady: true }),
       loadCurrentSession(),
-    ]).then(() => {
+    ]).then(([loaded]) => {
       if (cancelled) return
+      // Emit app_ready once data has loaded. item_count = session count so
+      // Dreaming can gauge how active this log is without counting raw entries.
+      const sessionCount = groupSessions(loaded || []).length
+      window.mobius?.signal?.('app_ready', { item_count: sessionCount })
     })
     return () => { cancelled = true }
   }, [loadCurrentSession, loadEntries])
@@ -3078,6 +3082,10 @@ export default function App({ appId, token }) {
         // eslint-disable-next-line no-console
         console.error('entries save failed', err)
         bumpSync({ synced: false, error: true })
+        window.mobius?.signal?.('error', {
+          message: err?.message || 'entries save failed',
+          source: 'save',
+        })
       }
     }
     q.inFlight = false
@@ -3119,6 +3127,7 @@ export default function App({ appId, token }) {
 
   const deleteEntry = useCallback((id) => {
     persist((entries || []).filter((e) => e.id !== id), { deletedIds: [id] })
+    window.mobius?.signal?.('item_deleted')
   }, [entries, persist])
 
   const finishCurrentSession = useCallback(async () => {
@@ -3133,6 +3142,26 @@ export default function App({ appId, token }) {
       setCurrentSession(null)
       const result = await store.set('current_session.json', null)
       bumpSync(result)
+
+      // session_logged: one signal per user "Finish session" gesture.
+      const durationMin = currentSession
+        ? Math.round((Date.now() - (currentSession.startedAt || Date.now())) / 60000)
+        : undefined
+      window.mobius?.signal?.('session_logged', {
+        exercise_count: committed.length,
+        ...(durationMin != null && durationMin > 0 ? { duration_min: durationMin } : {}),
+      })
+
+      // pr_hit: emit once per strength exercise that sets a new e1RM.
+      const prevPRs = strengthPRs(entries || [])
+      const prevMap = new Map(prevPRs.map((pr) => [pr.activity, pr.e1rm]))
+      const nextPRs = strengthPRs(nextEntries)
+      for (const pr of nextPRs) {
+        const prev = prevMap.get(pr.activity)
+        if (prev == null || pr.e1rm > prev) {
+          window.mobius?.signal?.('pr_hit', { exercise: pr.activity })
+        }
+      }
     } finally {
       finishInFlightRef.current = false
       setFinishing(false)
