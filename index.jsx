@@ -1807,8 +1807,6 @@ function useSyncStatus(store) {
   const [pending, setPending] = useState(0)
   const [online, setOnline] = useState(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true)
-  const [flash, setFlash] = useState(null)
-  const flashTimerRef = useRef(null)
 
   const refresh = useCallback(async () => {
     try { setPending(await store.pendingCount()) } catch { /* keep previous */ }
@@ -1825,38 +1823,28 @@ function useSyncStatus(store) {
       clearInterval(id)
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
-      if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
     }
   }, [refresh])
 
-  const bump = useCallback((result) => {
-    if (result && result.queued) setFlash('pending')
-    else if (result && result.synced) setFlash('saved')
-    if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
-    flashTimerRef.current = setTimeout(() => {
-      setFlash(null); flashTimerRef.current = null
-    }, 1200)
-    refresh()
-  }, [refresh])
+  // bump: called after a store.set to refresh pending count. Flash chrome
+  // removed (standard: nothing shown when online+idle).
+  const bump = useCallback(() => { refresh() }, [refresh])
 
-  return { pending, online, flash, bump, refresh }
+  return { pending, online, bump, refresh }
 }
 
+// Standard: show nothing when online+idle. Only surface Offline state.
 function SyncPill({ status }) {
-  const { pending, online, flash } = status
-  let label, variant
-  if (!online && pending > 0) { label = `Offline · ${pending} pending`; variant = 'offline' }
-  else if (!online) { label = 'Offline'; variant = 'offline' }
-  else if (pending > 0) { label = `Syncing · ${pending}`; variant = 'pending' }
-  else if (flash === 'saved') { label = 'Saved'; variant = 'saved' }
-  else if (flash === 'pending') { label = 'Queued'; variant = 'pending' }
-  else return null
-  const mod = variant === 'offline'
-    ? ' is-offline'
-    : (variant === 'pending' ? ' is-pending' : '')
+  const { pending, online } = status
+  if (online && pending === 0) return null
+  const label = !online
+    ? (pending > 0 ? `Offline · ${pending} pending` : 'Offline')
+    : null
+  if (!label) return null
   return (
-    <span className={`wk-pill${mod}`} role="status" aria-live="polite"
-      aria-label={variant === 'offline' ? `Offline${pending > 0 ? `, ${pending} pending` : ''}` : label}>
+    <span className="wk-pill is-offline" role="status" aria-live="polite"
+      title="Changes save locally and sync when you're back online."
+      aria-label={`Offline${pending > 0 ? `, ${pending} pending` : ''}`}>
       {label}
     </span>
   )
