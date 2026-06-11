@@ -2279,11 +2279,13 @@ function groupEntriesByDate(entries) {
     .map(([date, rows]) => ({ date, entries: rows }))
 }
 
-function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height }) {
+function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height, quickActions }) {
   const mountRef = useRef(null)
   const [error, setError] = useState(null)
   const onEntriesRef = useRef(onEntriesMaybeChanged)
   useEffect(() => { onEntriesRef.current = onEntriesMaybeChanged }, [onEntriesMaybeChanged])
+  const quickActionsRef = useRef(quickActions)
+  useEffect(() => { quickActionsRef.current = quickActions }, [quickActions])
   const systemPrompt = useMemo(() => workoutAgentPrompt(appId), [appId])
 
   useEffect(() => {
@@ -2302,6 +2304,7 @@ function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height }) 
       title: 'Workout',
       systemPrompt,
       picker: true,
+      quickActions: quickActionsRef.current,
       onTurnDone: () => { onEntriesRef.current?.() },
       onError: ({ error: chatError }) => {
         setError(typeof chatError === 'string' ? chatError : 'Embedded chat reported an error.')
@@ -3163,6 +3166,11 @@ export default function App({ appId, token }) {
   const bodyRef = useRef(null)
   const [chatHeight, setChatHeight] = useState(() => readChatHeight(appId))
 
+  const quickActions = useMemo(() => [
+    { label: 'Log a workout', prompt: 'Log a workout for me.' },
+    { label: 'What did I train this week?', prompt: 'Summarize what I trained this week.' },
+  ], [])
+
   const [editingEntry, setEditingEntry] = useState(null)
   // quickAddDraft: { category, activity, metrics } pre-filled from the last
   // logged instance of that exercise. null when not open. lastEntryForQuickAdd
@@ -3615,6 +3623,7 @@ export default function App({ appId, token }) {
               token={token}
               store={store}
               height={chatHeight}
+              quickActions={quickActions}
               onEntriesMaybeChanged={() => {
                 loadEntries({ allowMigration: false })
                 loadCurrentSession()
