@@ -970,6 +970,47 @@ function summarizeStrengthSets(sets) {
 }
 
 // One-line summary of an entry's metrics, for the feed card.
+// ---------------------------------------------------------------------------
+// Quick-add helpers — speed-up the "log same as last time" flow.
+// ---------------------------------------------------------------------------
+
+// The most recent stored entry for a given exercise (category + activity).
+// Returns null when no history exists. Used to pre-fill ConfirmCard with the
+// previous session's weight/reps so a repeat set is one tap (chip → save).
+function lastEntryForExercise(entries, category, activity) {
+  const key = exerciseKey(category, activity)
+  let best = null
+  for (const e of entries || []) {
+    if (exerciseKey(e.category, e.activity) === key) {
+      if (!best || e.ts > best.ts) best = e
+    }
+  }
+  return best
+}
+
+// The N most recently logged distinct exercises (category + activity pairs),
+// ordered by last-logged time descending. Used to render quick-add chips on
+// the Log tab so tapping a chip pre-fills the ConfirmCard.
+function recentExercises(entries, n = 5) {
+  const seen = new Map()
+  const sorted = [...(entries || [])].sort((a, b) => b.ts - a.ts)
+  for (const e of sorted) {
+    const key = exerciseKey(e.category, e.activity)
+    if (!seen.has(key)) {
+      seen.set(key, {
+        key,
+        category: e.category,
+        activity: e.activity,
+        icon: CATEGORIES[e.category]?.icon || CATEGORIES.other.icon,
+        color: CATEGORIES[e.category]?.color || CATEGORIES.other.color,
+        lastTs: e.ts,
+      })
+    }
+    if (seen.size >= n) break
+  }
+  return [...seen.values()]
+}
+
 function summarizeMetrics(entry) {
   const fam = categoryFamily(entry.category)
   if (fam === 'strength') {
@@ -1003,6 +1044,8 @@ export {
   draftsFromParsedPayload,
   groupSessions,
   summarizeMetrics,
+  lastEntryForExercise,
+  recentExercises,
 }
 // ===== INLINE-LOGIC END =====
 
@@ -1706,6 +1749,42 @@ const CSS = `
 .wk-btn-row-finish { justify-content: space-between; align-items: center; margin-top: 4px; }
 .wk-min44 { min-width: 44px; }
 
+/* Quick-add strip — recent exercise chips on the Log tab so a repeat set is one tap. */
+.wk-quick-add {
+  margin-bottom: 14px;
+  padding: 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
+.wk-quick-add-label {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 8px; font-size: 12px; font-weight: 700; color: var(--muted);
+  user-select: none;
+}
+.wk-quick-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 38px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 65%, transparent);
+  color: var(--text); font-family: var(--font); font-size: 13px; font-weight: 600;
+  cursor: pointer; touch-action: manipulation; user-select: none;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wk-quick-chip:active { opacity: 0.75; transform: scale(0.96); }
+}
+.wk-quick-chip-row {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.wk-quick-add-btn {
+  min-height: 38px; padding: 6px 14px; border-radius: 999px;
+  border: 1px dashed var(--border); background: transparent;
+  color: var(--accent); font-family: var(--font); font-size: 13px; font-weight: 700;
+  cursor: pointer; touch-action: manipulation; user-select: none;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wk-quick-add-btn:active { opacity: 0.75; }
+}
+
 /* mobius-ui:ReducedMotion v1 -- honor the OS reduce-motion setting */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -1818,6 +1897,7 @@ function ConfirmModal({ title, body, confirmLabel, onConfirm, onCancel }) {
 function ConfirmCard({
   draft, ambiguous, clarification, onCommit, onCancel, position = 1, total = 1,
   initialTs = Date.now(), title = null, commitLabel = null,
+  lastEntry = null,
 }) {
   const [category, setCategory] = useState(draft.category)
   const [activity, setActivity] = useState(draft.activity)
@@ -1831,6 +1911,9 @@ function ConfirmCard({
   })
 
   // Strength sets — editable rows of {weight, reps, unit}, in DISPLAY units.
+  // Seed from draft if it has data; otherwise fall back to the last logged entry
+  // for this exercise (the "same as last time" default that makes repeat sets
+  // one tap: chip → ConfirmCard pre-filled → Save).
   const [sets, setSets] = useState(() => {
     const s = draft.metrics?.sets
     if (Array.isArray(s) && s.length > 0) {
@@ -1840,15 +1923,45 @@ function ConfirmCard({
         unit: x.unit === 'lb' ? 'lb' : 'kg',
       }))
     }
+    // Fall back to last entry's display-unit sets when the draft is empty.
+    if (lastEntry && categoryFamily(lastEntry.category) === 'strength') {
+      const prevSets = lastEntry.metrics?.sets || []
+      if (prevSets.length > 0) {
+        return prevSets.map((s) => {
+          const unit = s.unit === 'lb' ? 'lb' : 'kg'
+          return {
+            weight: s.weight_kg == null ? '' : String(fromKg(s.weight_kg, unit)),
+            reps: s.reps == null ? '' : String(s.reps),
+            unit,
+          }
+        })
+      }
+    }
     return [{ weight: '', reps: '', unit: 'kg' }]
   })
   // Cardio/other — display-unit metric fields.
-  const [duration, setDuration] = useState(draft.metrics?.duration?.value ?? '')
-  const [durationUnit, setDurationUnit] = useState(draft.metrics?.duration?.unit ?? 'min')
-  const [distance, setDistance] = useState(draft.metrics?.distance?.value ?? '')
-  const [distanceUnit, setDistanceUnit] = useState(draft.metrics?.distance?.unit ?? 'km')
+  // When the draft is empty and we have a last entry, seed with its values so
+  // the user only needs to confirm rather than retype.
+  const lastCardio = lastEntry && categoryFamily(lastEntry.category) === 'cardio'
+    ? lastEntry : null
+  const lastDurationDisplay = lastCardio ? secondsToDisplay(lastCardio.metrics?.duration_s) : null
+  const lastDistanceDisplay = lastCardio ? metresToDisplay(lastCardio.metrics?.distance_m) : null
+  const [duration, setDuration] = useState(
+    draft.metrics?.duration?.value ?? (lastDurationDisplay?.value || ''),
+  )
+  const [durationUnit, setDurationUnit] = useState(
+    draft.metrics?.duration?.unit ?? (lastDurationDisplay?.unit || 'min'),
+  )
+  const [distance, setDistance] = useState(
+    draft.metrics?.distance?.value ?? (lastDistanceDisplay?.value || ''),
+  )
+  const [distanceUnit, setDistanceUnit] = useState(
+    draft.metrics?.distance?.unit ?? (lastDistanceDisplay?.unit || 'km'),
+  )
   const [elevation, setElevation] = useState(draft.metrics?.elevation?.value ?? '')
-  const [location, setLocation] = useState(draft.metrics?.location ?? '')
+  const [location, setLocation] = useState(
+    draft.metrics?.location ?? (lastCardio?.metrics?.location || ''),
+  )
   const [note, setNote] = useState(draft.metrics?.note ?? '')
   // Category change crossing a metric family clears the old family's inputs (a
   // strength entry has sets; a cardio one has distance/duration; etc). Since
@@ -1950,6 +2063,7 @@ function ConfirmCard({
         className="wk-input" value={activity}
         onChange={(e) => setActivity(e.target.value)}
         aria-label="Activity name" placeholder="e.g. Deadlift, Trail run"
+        enterKeyHint="next" autoComplete="off" autoCorrect="off" spellCheck="false"
       />
 
       <div className="wk-spacer-12" />
@@ -2003,11 +2117,13 @@ function ConfirmCard({
                 className="wk-input" type="number" inputMode="decimal" value={s.weight}
                 onChange={(e) => updateSet(i, { weight: e.target.value })}
                 aria-label={`Set ${i + 1} weight`} placeholder="kg"
+                enterKeyHint="next"
               />
               <input
                 className="wk-input" type="number" inputMode="numeric" value={s.reps}
                 onChange={(e) => updateSet(i, { reps: e.target.value })}
                 aria-label={`Set ${i + 1} reps`} placeholder="reps"
+                enterKeyHint={i === sets.length - 1 ? 'done' : 'next'}
               />
               <button
                 className="wk-btn-ghost is-muted wk-min44"
@@ -2226,6 +2342,51 @@ function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height }) 
   )
 }
 
+// ---------------------------------------------------------------------------
+// QuickAddStrip — shows the 5 most recently used exercises as tap chips.
+// Tapping a chip opens a ConfirmCard pre-filled with the last logged values
+// (weight/reps/unit for strength, duration/distance for cardio). A "+ New"
+// button lets the user open a blank ConfirmCard for any exercise.
+// This turns "same as last time" from type-in-chat into a single tap.
+// ---------------------------------------------------------------------------
+
+function QuickAddStrip({ entries, onQuickAdd }) {
+  const recents = useMemo(() => recentExercises(entries, 5), [entries])
+  if (!entries || entries.length === 0) {
+    return (
+      <div className="wk-quick-add">
+        <div className="wk-quick-add-label">Quick add</div>
+        <div className="wk-quick-chip-row">
+          <button className="wk-quick-add-btn" onClick={() => onQuickAdd(null, null)}
+            aria-label="Add new exercise">+ New exercise</button>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="wk-quick-add">
+      <div className="wk-quick-add-label">
+        <span>Quick add</span>
+        <button className="wk-quick-add-btn" style={{ marginLeft: 0 }}
+          onClick={() => onQuickAdd(null, null)} aria-label="Add new exercise">+ New</button>
+      </div>
+      <div className="wk-quick-chip-row">
+        {recents.map((ex) => (
+          <button
+            key={ex.key}
+            className="wk-quick-chip"
+            onClick={() => onQuickAdd(ex, entries)}
+            aria-label={`Quick-add ${ex.activity}`}
+          >
+            <SportIcon name={ex.icon} color={ex.color} size={15} />
+            {ex.activity}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function EntryCard({ entry, onDelete, onEdit }) {
   const cat = CATEGORIES[entry.category] || CATEGORIES.other
   const time = new Date(entry.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
@@ -2321,21 +2482,25 @@ function CurrentSessionPanel({ session, onFinish, finishing = false }) {
   )
 }
 
-function LogTab({ entries, onDelete, onEdit }) {
+function LogTab({ entries, onDelete, onEdit, onQuickAdd }) {
   const groups = useMemo(() => groupEntriesByDate(entries), [entries])
   if (entries.length === 0) {
     return (
-      <div className="wk-empty">
-        <div className="wk-empty-icon">
-          <SportIcon name="barbell" color="var(--accent)" size={30} />
+      <>
+        <QuickAddStrip entries={entries} onQuickAdd={onQuickAdd} />
+        <div className="wk-empty">
+          <div className="wk-empty-icon">
+            <SportIcon name="barbell" color="var(--accent)" size={30} />
+          </div>
+          <strong style={{ color: 'var(--text)' }}>No workouts yet.</strong>
         </div>
-        <strong style={{ color: 'var(--text)' }}>No workouts yet.</strong>
-      </div>
+      </>
     )
   }
   const todayIso = localDate()
   return (
     <div>
+      <QuickAddStrip entries={entries} onQuickAdd={onQuickAdd} />
       {groups.map((group) => {
         const dateLabel = group.date === todayIso
           ? 'Today'
@@ -2828,7 +2993,7 @@ function InsightsTab({ entries }) {
   return (
     <div>
       <div className="wk-chart-card">
-        <h3 className="wk-chart-title">Current streak</h3>
+        <h3 className="wk-chart-title">Streak</h3>
         <p className="wk-chart-sub">Consecutive days with at least one logged activity.</p>
         <div className="wk-streak-value">
           {streak} <span className="wk-streak-unit">day{streak === 1 ? '' : 's'}</span>
@@ -2836,50 +3001,10 @@ function InsightsTab({ entries }) {
         <Heatmap entries={entries} />
       </div>
 
-      <div className="wk-chart-card">
-        <h3 className="wk-chart-title">Weekly volume</h3>
-        <p className="wk-chart-sub">Strength = kg-reps, cardio = km, other = minutes across the last 6 weeks.</p>
-        <CategoryVolumeBars weeks={weeks} />
-      </div>
-
-      <div className="wk-chart-card">
-        <h3 className="wk-chart-title">Category stats</h3>
-        <p className="wk-chart-sub">Sessions and useful totals by activity type.</p>
-        <CategoryStats stats={stats} />
-      </div>
-
-      {exercises.length > 0 && (
-        <div className="wk-chart-card">
-          <h3 className="wk-chart-title">Exercises</h3>
-          <p className="wk-chart-sub">Tap any exercise for its trend, records, and full history.</p>
-          <table className="wk-pr-table">
-            <thead>
-              <tr>
-                <th className="wk-pr-th">Exercise</th>
-                <th className="wk-pr-th is-right">Best</th>
-                <th className="wk-pr-th is-right">Sessions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {exercises.slice(0, 8).map((row) => (
-                <tr key={row.key}>
-                  <td className="wk-pr-td">
-                    <ExerciseLink icon={row.icon} color={row.color} activity={row.activity}
-                      onOpen={() => openEx(row.category, row.activity)} />
-                  </td>
-                  <td className="wk-pr-td is-right">{row.best}</td>
-                  <td className="wk-pr-td is-right">{row.sessions}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
       {prs.length > 0 && (
         <div className="wk-chart-card">
           <h3 className="wk-chart-title">Strength PRs</h3>
-          <p className="wk-chart-sub">Ranked by estimated 1-rep max (Epley). Tap a lift for its trend.</p>
+          <p className="wk-chart-sub">Best estimated 1RM per lift. Tap to see the trend.</p>
           <table className="wk-pr-table">
             <thead>
               <tr>
@@ -2941,6 +3066,46 @@ function InsightsTab({ entries }) {
           </table>
         </div>
       )}
+
+      {exercises.length > 0 && (
+        <div className="wk-chart-card">
+          <h3 className="wk-chart-title">Exercises</h3>
+          <p className="wk-chart-sub">Tap any exercise for its trend, records, and full history.</p>
+          <table className="wk-pr-table">
+            <thead>
+              <tr>
+                <th className="wk-pr-th">Exercise</th>
+                <th className="wk-pr-th is-right">Best</th>
+                <th className="wk-pr-th is-right">Sessions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {exercises.slice(0, 8).map((row) => (
+                <tr key={row.key}>
+                  <td className="wk-pr-td">
+                    <ExerciseLink icon={row.icon} color={row.color} activity={row.activity}
+                      onOpen={() => openEx(row.category, row.activity)} />
+                  </td>
+                  <td className="wk-pr-td is-right">{row.best}</td>
+                  <td className="wk-pr-td is-right">{row.sessions}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="wk-chart-card">
+        <h3 className="wk-chart-title">Weekly volume</h3>
+        <p className="wk-chart-sub">Strength = kg-reps, cardio = km, other = min — last 6 weeks.</p>
+        <CategoryVolumeBars weeks={weeks} />
+      </div>
+
+      <div className="wk-chart-card">
+        <h3 className="wk-chart-title">Category stats</h3>
+        <p className="wk-chart-sub">Sessions and useful totals by activity type.</p>
+        <CategoryStats stats={stats} />
+      </div>
 
       {detail && <ExerciseDetailSheet detail={detail} onClose={() => setSelected(null)} />}
     </div>
@@ -3011,6 +3176,11 @@ export default function App({ appId, token }) {
   const [chatHeight, setChatHeight] = useState(() => readChatHeight(appId))
 
   const [editingEntry, setEditingEntry] = useState(null)
+  // quickAddDraft: { category, activity, metrics } pre-filled from the last
+  // logged instance of that exercise. null when not open. lastEntryForQuickAdd
+  // is the matching stored entry (for the ConfirmCard defaulting logic).
+  const [quickAddDraft, setQuickAddDraft] = useState(null)
+  const [lastEntryForQuickAdd, setLastEntryForQuickAdd] = useState(null)
   const [deletePending, setDeletePending] = useState(null) // entry id awaiting confirm
   const navHandleRef = useRef(null)
 
@@ -3133,6 +3303,22 @@ export default function App({ appId, token }) {
     flushSaves()
   }, [flushSaves])
 
+  const commitQuickAdd = useCallback((draft, ts) => {
+    const sessionId = assignSession(entries || [], ts)
+    const entry = normalizeEntry(draft, {
+      ts,
+      sessionId,
+      raw: '',
+      source: 'manual',
+      confirmed: true,
+    })
+    persist([...(entries || []), entry])
+    closeNestedNav()
+    setQuickAddDraft(null)
+    setLastEntryForQuickAdd(null)
+    window.mobius?.signal?.('item_created')
+  }, [entries, persist, closeNestedNav])
+
   const commitEditedEntry = useCallback((edited, ts) => {
     if (!editingEntry) return
     const sessionId = editingEntry.sessionId || assignSession(
@@ -3254,6 +3440,31 @@ export default function App({ appId, token }) {
     navHandleRef.current = null
   }, [])
 
+  // Open the quick-add ConfirmCard. `ex` is a recentExercises row (has
+  // category + activity) or null for a blank new entry. `allEntries` is the
+  // current entries array, used to look up the last logged values.
+  const openQuickAdd = useCallback(async (ex, allEntries) => {
+    closeNestedNav()
+    if (window.mobius?.nav?.open) {
+      const handle = window.mobius.nav.open('workout-quick-add', () => {
+        navHandleRef.current = null
+        setQuickAddDraft(null)
+        setLastEntryForQuickAdd(null)
+      })
+      navHandleRef.current = handle
+      await handle.ready?.catch(() => false)
+      if (navHandleRef.current !== handle) return
+    }
+    if (ex && allEntries) {
+      const last = lastEntryForExercise(allEntries, ex.category, ex.activity)
+      setLastEntryForQuickAdd(last)
+      setQuickAddDraft({ category: ex.category, activity: ex.activity, metrics: {} })
+    } else {
+      setLastEntryForQuickAdd(null)
+      setQuickAddDraft({ category: 'strength', activity: '', metrics: {} })
+    }
+  }, [closeNestedNav])
+
   const openEditEntry = useCallback(async (entry, nextTab = null) => {
     if (!entry) return
     closeNestedNav()
@@ -3286,9 +3497,9 @@ export default function App({ appId, token }) {
   }, [closeNestedNav])
 
   useEffect(() => {
-    if (editingEntry || deletePending) return
+    if (editingEntry || deletePending || quickAddDraft) return
     closeNestedNav()
-  }, [editingEntry, deletePending, closeNestedNav])
+  }, [editingEntry, deletePending, quickAddDraft, closeNestedNav])
 
   useEffect(() => () => closeNestedNav(), [closeNestedNav])
 
@@ -3311,7 +3522,7 @@ export default function App({ appId, token }) {
         <SyncPill status={syncStatus} />
       </div>
 
-      {!editingEntry && (
+      {!editingEntry && !quickAddDraft && (
         <nav className="wk-tabbar" role="tablist" aria-label="Activity tabs">
           <button className={`wk-tab-btn${tab === 'log' ? ' is-active' : ''}`} onClick={() => setTab('log')}
             role="tab" aria-selected={tab === 'log'} aria-label="Log">
@@ -3345,6 +3556,22 @@ export default function App({ appId, token }) {
                   setEditingEntry(null)
                 }}
               />
+            ) : quickAddDraft ? (
+              <ConfirmCard
+                draft={quickAddDraft}
+                ambiguous={false}
+                clarification=""
+                initialTs={Date.now()}
+                title="Log exercise"
+                commitLabel="Save to log"
+                lastEntry={lastEntryForQuickAdd}
+                onCommit={commitQuickAdd}
+                onCancel={() => {
+                  closeNestedNav()
+                  setQuickAddDraft(null)
+                  setLastEntryForQuickAdd(null)
+                }}
+              />
             ) : (
               <>
                 {tab === 'log' && (
@@ -3360,6 +3587,7 @@ export default function App({ appId, token }) {
                       entries={entries}
                       onDelete={openDeleteConfirm}
                       onEdit={openEditEntry}
+                      onQuickAdd={openQuickAdd}
                     />
                   </>
                 )}
@@ -3378,7 +3606,7 @@ export default function App({ appId, token }) {
           </div>
         </div>
 
-        {!editingEntry && tab === 'log' && (
+        {!editingEntry && !quickAddDraft && tab === 'log' && (
           <>
             <div
               className="workout-chat-resizer wk-chat-resizer"

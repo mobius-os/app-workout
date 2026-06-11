@@ -25,6 +25,8 @@ const TEST_EXPORTS = [
   'draftsFromParsedPayload',
   'groupSessions',
   'summarizeMetrics',
+  'lastEntryForExercise',
+  'recentExercises',
 ]
 
 export function stripExports(logicSource) {

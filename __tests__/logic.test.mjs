@@ -16,6 +16,7 @@ import {
   mergeEntriesForSave, draftsFromParsedPayload, normalizeCurrentSession,
   sessionEntryMissing, currentSessionReady, entriesFromCurrentSession,
   exerciseKey, exerciseList, exerciseDetail, paceSecPerKm, fmtPace,
+  lastEntryForExercise, recentExercises,
 } from '../logic.js'
 import { buildEntry } from '../build-entry.mjs'
 
@@ -570,4 +571,51 @@ test('exerciseList shows the heaviest weight when a set has no reps (not a bare 
   const entries = [strengthEntry('nr', base, 'sNR', 'Deadlift', [[100, null]])]
   const row = exerciseList(entries).find((r) => r.activity === 'Deadlift')
   assert.equal(row.best, '100kg')
+})
+
+// ---------------------------------------------------------------------------
+// Quick-add helpers (lastEntryForExercise, recentExercises)
+// ---------------------------------------------------------------------------
+
+test('lastEntryForExercise returns the most recent entry for category+activity', () => {
+  const entries = [
+    strengthEntry('a', base, 'sA', 'Deadlift', [[100, 5]]),
+    strengthEntry('b', base + DAY, 'sB', 'Deadlift', [[105, 5]]),
+    strengthEntry('c', base + 2 * DAY, 'sC', 'Squat', [[120, 5]]),
+  ]
+  const last = lastEntryForExercise(entries, 'strength', 'Deadlift')
+  assert.equal(last.id, 'b')
+  assert.equal(last.metrics.sets[0].weight_kg, 105)
+})
+
+test('lastEntryForExercise returns null when no entries for that exercise', () => {
+  const entries = [strengthEntry('a', base, 'sA', 'Squat', [[100, 5]])]
+  assert.equal(lastEntryForExercise(entries, 'strength', 'Deadlift'), null)
+  assert.equal(lastEntryForExercise([], 'strength', 'Deadlift'), null)
+  assert.equal(lastEntryForExercise(null, 'strength', 'Deadlift'), null)
+})
+
+test('recentExercises returns up to N most recently logged distinct exercises', () => {
+  // FIXTURE has: Deadlift (4 entries, most recent base+2d), Squat (base+3d), Run (base+4d & base+5d)
+  const recents = recentExercises(FIXTURE, 3)
+  assert.equal(recents.length, 3)
+  // Most recently logged first: Run (base+5d), Squat (base+3d), Deadlift (base+2d)
+  assert.equal(recents[0].activity, 'Run')
+  assert.equal(recents[1].activity, 'Squat')
+  assert.equal(recents[2].activity, 'Deadlift')
+  // Each row carries icon + color
+  assert.ok(recents[0].icon)
+  assert.ok(recents[0].color)
+})
+
+test('recentExercises deduplicates and respects n cap', () => {
+  const entries = [
+    strengthEntry('a', base + 5 * DAY, 'sA', 'Bench', [[80, 8]]),
+    strengthEntry('b', base + 4 * DAY, 'sB', 'Bench', [[80, 8]]),
+    strengthEntry('c', base + 3 * DAY, 'sC', 'Deadlift', [[100, 5]]),
+  ]
+  const recents = recentExercises(entries, 2)
+  assert.equal(recents.length, 2)
+  assert.equal(recents[0].activity, 'Bench')
+  assert.equal(recents[1].activity, 'Deadlift')
 })

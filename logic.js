@@ -962,6 +962,47 @@ function summarizeStrengthSets(sets) {
 }
 
 // One-line summary of an entry's metrics, for the feed card.
+// ---------------------------------------------------------------------------
+// Quick-add helpers — speed-up the "log same as last time" flow.
+// ---------------------------------------------------------------------------
+
+// The most recent stored entry for a given exercise (category + activity).
+// Returns null when no history exists. Used to pre-fill ConfirmCard with the
+// previous session's weight/reps so a repeat set is one tap (chip → save).
+export function lastEntryForExercise(entries, category, activity) {
+  const key = exerciseKey(category, activity)
+  let best = null
+  for (const e of entries || []) {
+    if (exerciseKey(e.category, e.activity) === key) {
+      if (!best || e.ts > best.ts) best = e
+    }
+  }
+  return best
+}
+
+// The N most recently logged distinct exercises (category + activity pairs),
+// ordered by last-logged time descending. Used to render quick-add chips on
+// the Log tab so tapping a chip pre-fills the ConfirmCard.
+export function recentExercises(entries, n = 5) {
+  const seen = new Map()
+  const sorted = [...(entries || [])].sort((a, b) => b.ts - a.ts)
+  for (const e of sorted) {
+    const key = exerciseKey(e.category, e.activity)
+    if (!seen.has(key)) {
+      seen.set(key, {
+        key,
+        category: e.category,
+        activity: e.activity,
+        icon: CATEGORIES[e.category]?.icon || CATEGORIES.other.icon,
+        color: CATEGORIES[e.category]?.color || CATEGORIES.other.color,
+        lastTs: e.ts,
+      })
+    }
+    if (seen.size >= n) break
+  }
+  return [...seen.values()]
+}
+
 export function summarizeMetrics(entry) {
   const fam = categoryFamily(entry.category)
   if (fam === 'strength') {
