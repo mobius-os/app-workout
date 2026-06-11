@@ -1180,7 +1180,19 @@ function makeStore(appId, token) {
     return 0
   }
 
-  return { get, set, pendingCount }
+  // Subscribe to external writes to `path` (e.g. the embedded agent updating
+  // current_session.json mid-session) so a mounted view repaints instead of
+  // showing its stale mount-time read. No-op unsubscribe when the offline
+  // runtime isn't present.
+  function subscribe(path, cb) {
+    const ms = (typeof window !== 'undefined') ? window.mobius?.storage : null
+    if (ms && typeof ms.subscribe === 'function') {
+      try { return ms.subscribe(path, cb) } catch { return () => {} }
+    }
+    return () => {}
+  }
+
+  return { get, set, pendingCount, subscribe }
 }
 
 // ---------------------------------------------------------------------------
@@ -3070,6 +3082,15 @@ export default function App({ appId, token }) {
     })
     return () => { cancelled = true }
   }, [loadCurrentSession, loadEntries])
+
+  // The embedded agent writes current_session.json mid-session from a
+  // chat turn; without a subscription the card keeps its stale mount-time
+  // read and the owner sees a blank panel after the agent logs a set.
+  // Re-load on every external write so agent-written drafts surface live.
+  useEffect(() => {
+    const unsub = store.subscribe('current_session.json', () => { loadCurrentSession() })
+    return () => { if (typeof unsub === 'function') unsub() }
+  }, [store, loadCurrentSession])
   const flushSaves = useCallback(async () => {
     const q = saveQueueRef.current
     if (q.inFlight) return
