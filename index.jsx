@@ -3149,7 +3149,7 @@ function AllTab({ entries, onDelete, onEdit }) {
 
 export default function App({ appId, token }) {
   const store = useMemo(() => makeStore(appId, token), [appId, token])
-  const [tab, setTab] = useState('log')
+  const [tab, setTab] = useState('session')
   const [entries, setEntries] = useState(null)
   const [currentSession, setCurrentSession] = useState(null)
   const [bootStatus, setBootStatus] = useState('loading')
@@ -3163,6 +3163,9 @@ export default function App({ appId, token }) {
   // tap before React re-renders the disabled button.
   const finishInFlightRef = useRef(false)
   const [finishing, setFinishing] = useState(false)
+  // Brief "Session saved" confirmation after Finish. Auto-clears in 3s.
+  const [sessionSaved, setSessionSaved] = useState(false)
+  const sessionSavedTimerRef = useRef(null)
   const bodyRef = useRef(null)
   const [chatHeight, setChatHeight] = useState(() => readChatHeight(appId))
 
@@ -3336,7 +3339,7 @@ export default function App({ appId, token }) {
     })
     persist((entries || []).map((row) => (row.id === editingEntry.id ? entry : row)))
     setEditingEntry(null)
-    setTab('log')
+    setTab('history')
   }, [editingEntry, entries, persist])
 
   const deleteEntry = useCallback((id) => {
@@ -3361,6 +3364,11 @@ export default function App({ appId, token }) {
       // optimistic merge above wouldn't include those. A fresh load also
       // settles any in-flight flushSaves race.
       loadEntries({ allowMigration: false })
+
+      // Show a brief "Session saved" confirmation on the Session tab.
+      clearTimeout(sessionSavedTimerRef.current)
+      setSessionSaved(true)
+      sessionSavedTimerRef.current = setTimeout(() => setSessionSaved(false), 3000)
 
       // session_logged: one signal per user "Finish session" gesture.
       const durationMin = currentSession
@@ -3503,7 +3511,7 @@ export default function App({ appId, token }) {
     return <div className="wk-root"><style>{CSS}</style><div className="wk-loading">Loading…</div></div>
   }
 
-  const subtitle = tab === 'log' ? 'Log anything.'
+  const subtitle = tab === 'session' ? (currentSession ? 'Session in progress.' : 'Ready to train.')
     : tab === 'insights' ? 'See the shape of it.'
     : 'Everything you\'ve logged.'
 
@@ -3520,17 +3528,17 @@ export default function App({ appId, token }) {
 
       {!editingEntry && !quickAddDraft && (
         <nav className="wk-tabbar" role="tablist" aria-label="Activity tabs">
-          <button className={`wk-tab-btn${tab === 'log' ? ' is-active' : ''}`} onClick={() => setTab('log')}
-            role="tab" aria-selected={tab === 'log'} aria-label="Log">
-            <span className="wk-tab-icon" aria-hidden>✎</span>Log
+          <button className={`wk-tab-btn${tab === 'session' ? ' is-active' : ''}`} onClick={() => setTab('session')}
+            role="tab" aria-selected={tab === 'session'} aria-label="Session">
+            <span className="wk-tab-icon" aria-hidden>✎</span>Session
+          </button>
+          <button className={`wk-tab-btn${tab === 'history' ? ' is-active' : ''}`} onClick={() => setTab('history')}
+            role="tab" aria-selected={tab === 'history'} aria-label="History">
+            <span className="wk-tab-icon" aria-hidden>≣</span>History
           </button>
           <button className={`wk-tab-btn${tab === 'insights' ? ' is-active' : ''}`} onClick={() => setTab('insights')}
             role="tab" aria-selected={tab === 'insights'} aria-label="Insights">
             <span className="wk-tab-icon" aria-hidden>▦</span>Insights
-          </button>
-          <button className={`wk-tab-btn${tab === 'all' ? ' is-active' : ''}`} onClick={() => setTab('all')}
-            role="tab" aria-selected={tab === 'all'} aria-label="All entries">
-            <span className="wk-tab-icon" aria-hidden>≣</span>All
           </button>
         </nav>
       )}
@@ -3570,39 +3578,40 @@ export default function App({ appId, token }) {
               />
             ) : (
               <>
-                {tab === 'log' && (
+                {tab === 'session' && (
                   <>
-                    {currentSession && (
+                    {sessionSaved && (
+                      <div className="wk-card" role="status" style={{ marginBottom: 14, textAlign: 'center', color: 'var(--accent)' }}>
+                        Session saved — find it in History.
+                      </div>
+                    )}
+                    {currentSession ? (
                       <CurrentSessionPanel
                         session={currentSession}
                         onFinish={finishCurrentSession}
                         finishing={finishing}
                       />
+                    ) : (
+                      <QuickAddStrip entries={entries} onQuickAdd={openQuickAdd} />
                     )}
-                    <LogTab
-                      entries={entries}
-                      onDelete={openDeleteConfirm}
-                      onEdit={openEditEntry}
-                      onQuickAdd={openQuickAdd}
-                    />
                   </>
                 )}
-                {tab === 'insights' && (
-                  <InsightsTab entries={entries} />
-                )}
-                {tab === 'all' && (
+                {tab === 'history' && (
                   <AllTab
                     entries={entries}
                     onDelete={openDeleteConfirm}
-                    onEdit={(entry) => openEditEntry(entry, 'log')}
+                    onEdit={(entry) => openEditEntry(entry, 'history')}
                   />
+                )}
+                {tab === 'insights' && (
+                  <InsightsTab entries={entries} />
                 )}
               </>
             )}
           </div>
         </div>
 
-        {!editingEntry && !quickAddDraft && tab === 'log' && (
+        {!editingEntry && !quickAddDraft && tab === 'session' && (
           <>
             <div
               className="workout-chat-resizer wk-chat-resizer"
