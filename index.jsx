@@ -2438,6 +2438,12 @@ function weeklyVolumeByCategory(entries) {
 
 function categoryStats(entries) {
   const sessions = groupSessions(entries)
+  // Precompute entry-id → sessionId in O(n) to avoid the O(n²) sessions.find
+  // scan that fired for every entry below.
+  const sessionByEntry = new Map()
+  for (const s of sessions) {
+    for (const e of s.entries) sessionByEntry.set(e.id, s.sessionId)
+  }
   const byCategory = new Map()
   for (const entry of entries || []) {
     const cat = CATEGORIES[entry.category] ? entry.category : 'other'
@@ -2455,8 +2461,8 @@ function categoryStats(entries) {
     }
     const row = byCategory.get(cat)
     row.entries += 1
-    const session = sessions.find((s) => s.entries.some((e) => e.id === entry.id))
-    if (session) row.sessions.add(session.sessionId)
+    const sid = sessionByEntry.get(entry.id)
+    if (sid) row.sessions.add(sid)
     const fam = categoryFamily(cat)
     if (fam === 'strength') row.strengthVolume += entryVolume(entry)
     else if (fam === 'cardio') {
@@ -3142,6 +3148,11 @@ export default function App({ appId, token }) {
       setCurrentSession(null)
       const result = await store.set('current_session.json', null)
       bumpSync(result)
+      // Reload entries after clearing the session — the agent may have
+      // written directly to entries.json during the session, and our
+      // optimistic merge above wouldn't include those. A fresh load also
+      // settles any in-flight flushSaves race.
+      loadEntries({ allowMigration: false })
 
       // session_logged: one signal per user "Finish session" gesture.
       const durationMin = currentSession
@@ -3166,7 +3177,7 @@ export default function App({ appId, token }) {
       finishInFlightRef.current = false
       setFinishing(false)
     }
-  }, [bumpSync, currentSession, entries, persist, store])
+  }, [bumpSync, currentSession, entries, loadEntries, persist, store])
 
   const resizeChatBy = useCallback((deltaPct) => {
     setChatHeight((value) => Math.min(82, Math.max(44, value + deltaPct)))
@@ -3317,11 +3328,13 @@ export default function App({ appId, token }) {
               <>
                 {tab === 'log' && (
                   <>
-                    <CurrentSessionPanel
-                      session={currentSession}
-                      onFinish={finishCurrentSession}
-                      finishing={finishing}
-                    />
+                    {currentSession && (
+                      <CurrentSessionPanel
+                        session={currentSession}
+                        onFinish={finishCurrentSession}
+                        finishing={finishing}
+                      />
+                    )}
                     <LogTab
                       entries={entries}
                       onDelete={openDeleteConfirm}
