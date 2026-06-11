@@ -3299,6 +3299,11 @@ export default function App({ appId, token }) {
     flushSaves()
   }, [flushSaves])
 
+  const closeNestedNav = useCallback(() => {
+    try { navHandleRef.current?.close?.() } catch {}
+    navHandleRef.current = null
+  }, [])
+
   const commitQuickAdd = useCallback((draft, ts) => {
     const sessionId = assignSession(entries || [], ts)
     const entry = normalizeEntry(draft, {
@@ -3430,11 +3435,6 @@ export default function App({ appId, token }) {
       setChatHeight(82)
     }
   }, [resizeChatBy])
-
-  const closeNestedNav = useCallback(() => {
-    try { navHandleRef.current?.close?.() } catch {}
-    navHandleRef.current = null
-  }, [])
 
   // Open the quick-add ConfirmCard. `ex` is a recentExercises row (has
   // category + activity) or null for a blank new entry. `allEntries` is the
