@@ -19,6 +19,7 @@ import {
   exerciseKey, exerciseList, exerciseDetail, paceSecPerKm, fmtPace,
   lastEntryForExercise, recentExercises,
   sportIconKey, sportIconColor, SPORT_ICON_RULES, SPORT_ICON_COLORS, CATEGORIES,
+  createVisiblePoller,
 } from '../logic.js'
 import { buildEntry } from '../build-entry.mjs'
 
@@ -763,4 +764,106 @@ test('sportIconColor: per-icon color, else category color, else generic', () => 
   assert.equal(sportIconColor('run', 'cardio'), SPORT_ICON_COLORS.run)
   assert.equal(sportIconColor('unknown-icon', 'cycling'), CATEGORIES.cycling.color)
   assert.equal(sportIconColor('unknown-icon', 'nope'), CATEGORIES.other.color)
+})
+
+// --- visible-tab poller (agent-logged sessions surface without a refresh) ---
+
+// Fake document/window pair: captures listeners and intervals so the poller's
+// start/stop state machine is observable without a browser or real timers.
+function fakeDom(visibility = 'visible') {
+  const docListeners = new Map()
+  const winListeners = new Map()
+  const intervals = new Map()
+  let nextId = 1
+  const doc = {
+    visibilityState: visibility,
+    addEventListener: (type, fn) => docListeners.set(type, fn),
+    removeEventListener: (type, fn) => {
+      if (docListeners.get(type) === fn) docListeners.delete(type)
+    },
+  }
+  const win = {
+    setInterval: (fn, ms) => { const id = nextId++; intervals.set(id, { fn, ms }); return id },
+    clearInterval: (id) => intervals.delete(id),
+    addEventListener: (type, fn) => winListeners.set(type, fn),
+    removeEventListener: (type, fn) => {
+      if (winListeners.get(type) === fn) winListeners.delete(type)
+    },
+  }
+  return {
+    doc, win, intervals, docListeners, winListeners,
+    setVisibility(v) {
+      doc.visibilityState = v
+      const fn = docListeners.get('visibilitychange')
+      if (fn) fn()
+    },
+    focus() {
+      const fn = winListeners.get('focus')
+      if (fn) fn()
+    },
+  }
+}
+
+test('createVisiblePoller: visible at creation ticks immediately and starts one interval', () => {
+  const dom = fakeDom('visible')
+  let ticks = 0
+  createVisiblePoller(() => { ticks += 1 }, { doc: dom.doc, win: dom.win, intervalMs: 5000 })
+  assert.equal(ticks, 1)
+  assert.equal(dom.intervals.size, 1)
+  assert.equal([...dom.intervals.values()][0].ms, 5000)
+})
+
+test('createVisiblePoller: hidden at creation stays idle until the tab becomes visible', () => {
+  const dom = fakeDom('hidden')
+  let ticks = 0
+  createVisiblePoller(() => { ticks += 1 }, { doc: dom.doc, win: dom.win })
+  assert.equal(ticks, 0)
+  assert.equal(dom.intervals.size, 0)
+  dom.setVisibility('visible')
+  assert.equal(ticks, 1)
+  assert.equal(dom.intervals.size, 1)
+})
+
+test('createVisiblePoller: hiding stops the interval; re-showing restarts without double-start', () => {
+  const dom = fakeDom('visible')
+  let ticks = 0
+  createVisiblePoller(() => { ticks += 1 }, { doc: dom.doc, win: dom.win })
+  dom.setVisibility('hidden')
+  assert.equal(dom.intervals.size, 0)
+  dom.setVisibility('visible')
+  assert.equal(dom.intervals.size, 1)
+  // A duplicate visible notification must not register a second interval —
+  // and must not tick either: start() guards on the live interval before
+  // its immediate tick, so only REAL hidden→visible transitions refresh.
+  dom.setVisibility('visible')
+  assert.equal(dom.intervals.size, 1)
+  assert.equal(ticks, 2)  // creation + the one real hidden→visible transition
+})
+
+test('createVisiblePoller: window focus ticks once, matching the direct focus listener', () => {
+  const dom = fakeDom('hidden')
+  let ticks = 0
+  createVisiblePoller(() => { ticks += 1 }, { doc: dom.doc, win: dom.win })
+  dom.focus()
+  assert.equal(ticks, 1)
+  assert.equal(dom.intervals.size, 0)  // focus alone never starts the interval
+})
+
+test('createVisiblePoller: cleanup clears the interval and unhooks both listeners', () => {
+  const dom = fakeDom('visible')
+  const cleanup = createVisiblePoller(() => {}, { doc: dom.doc, win: dom.win })
+  assert.equal(dom.intervals.size, 1)
+  cleanup()
+  assert.equal(dom.intervals.size, 0)
+  assert.equal(dom.docListeners.size, 0)
+  assert.equal(dom.winListeners.size, 0)
+})
+
+test('createVisiblePoller: interval callback is the tick itself', () => {
+  const dom = fakeDom('visible')
+  let ticks = 0
+  createVisiblePoller(() => { ticks += 1 }, { doc: dom.doc, win: dom.win })
+  const { fn } = [...dom.intervals.values()][0]
+  fn(); fn()
+  assert.equal(ticks, 3)
 })

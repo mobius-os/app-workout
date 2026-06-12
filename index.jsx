@@ -1159,6 +1159,48 @@ function summarizeMetrics(entry) {
   return parts.join(' · ')
 }
 
+// ---------------------------------------------------------------------------
+// Visible-tab poller — view wiring, but kept here (doc/win INJECTED, never read
+// from globals) so the start/stop state machine is provable under node --test
+// with fakes. Why it exists: storage.subscribe() only notifies writes made
+// through the same runtime instance, and a session logged from the MAIN shell
+// chat lands on the server from a different context entirely — without
+// polling, the Session card stays blank until a manual refresh.
+//
+// Contract: calls `tick` immediately and every `intervalMs` while the document
+// is visible; stops while hidden (no background battery/network burn); ticks
+// once on window focus so a returning owner sees agent-logged sets at once.
+// Returns the cleanup that unhooks both listeners and the interval. Callers
+// make `tick` cheap-and-idempotent (the session load no-ops its setState when
+// nothing changed), so duplicate ticks are harmless.
+// ---------------------------------------------------------------------------
+function createVisiblePoller(tick, { doc, win, intervalMs = 5000 }) {
+  let intervalId = null
+  const start = () => {
+    if (intervalId != null) return
+    tick()
+    intervalId = win.setInterval(tick, intervalMs)
+  }
+  const stop = () => {
+    if (intervalId != null) {
+      win.clearInterval(intervalId)
+      intervalId = null
+    }
+  }
+  const onVisibility = () => {
+    if (doc.visibilityState === 'visible') start()
+    else stop()
+  }
+  if (doc.visibilityState === 'visible') start()
+  win.addEventListener('focus', tick)
+  doc.addEventListener('visibilitychange', onVisibility)
+  return () => {
+    stop()
+    win.removeEventListener('focus', tick)
+    doc.removeEventListener('visibilitychange', onVisibility)
+  }
+}
+
 export {
   normalizeEntry,
   normalizeStoredEntries,
@@ -3443,7 +3485,13 @@ export default function App({ appId, token }) {
   const loadCurrentSession = useCallback(async () => {
     const loaded = await store.get('current_session.json')
     const normalized = normalizeCurrentSession(loaded)
-    setCurrentSession(normalized)
+    // Guard the state update against no-op churn: the visible-tab poll below
+    // calls this every few seconds, and replacing currentSession with a fresh
+    // deep-equal object every tick would re-render the whole Session view for
+    // nothing. Keep the previous reference when the value hasn't changed.
+    setCurrentSession((prev) =>
+      JSON.stringify(prev) === JSON.stringify(normalized) ? prev : normalized
+    )
     if (loaded && JSON.stringify(loaded) !== JSON.stringify(normalized)) {
       store.set('current_session.json', normalized).then((r) => bumpSync(r))
     }
@@ -3475,6 +3523,20 @@ export default function App({ appId, token }) {
     const unsub = store.subscribe('current_session.json', () => { loadCurrentSession() })
     return () => { if (typeof unsub === 'function') unsub() }
   }, [store, loadCurrentSession])
+
+  // subscribe() above only fires for writes made through THIS client (or the
+  // initial value). When a workout is logged from the MAIN shell chat, that
+  // write lands on the server from a different context, so the runtime never
+  // notifies this card — it stayed blank until a manual refresh. Poll the
+  // draft while the tab is visible, and refresh immediately on focus / becoming
+  // visible, so an agent-logged set surfaces within a few seconds with no
+  // reload. The poll is skipped mid-Finish so it can't resurrect a just-cleared
+  // session, and the load above no-ops its setState when nothing changed.
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return undefined
+    const tick = () => { if (!finishInFlightRef.current) loadCurrentSession() }
+    return createVisiblePoller(tick, { doc: document, win: window })
+  }, [loadCurrentSession])
   const flushSaves = useCallback(async () => {
     const q = saveQueueRef.current
     if (q.inFlight) return

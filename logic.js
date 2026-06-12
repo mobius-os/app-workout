@@ -1150,3 +1150,45 @@ export function summarizeMetrics(entry) {
   if (entry.metrics?.note) parts.push(entry.metrics.note)
   return parts.join(' · ')
 }
+
+// ---------------------------------------------------------------------------
+// Visible-tab poller — view wiring, but kept here (doc/win INJECTED, never read
+// from globals) so the start/stop state machine is provable under node --test
+// with fakes. Why it exists: storage.subscribe() only notifies writes made
+// through the same runtime instance, and a session logged from the MAIN shell
+// chat lands on the server from a different context entirely — without
+// polling, the Session card stays blank until a manual refresh.
+//
+// Contract: calls `tick` immediately and every `intervalMs` while the document
+// is visible; stops while hidden (no background battery/network burn); ticks
+// once on window focus so a returning owner sees agent-logged sets at once.
+// Returns the cleanup that unhooks both listeners and the interval. Callers
+// make `tick` cheap-and-idempotent (the session load no-ops its setState when
+// nothing changed), so duplicate ticks are harmless.
+// ---------------------------------------------------------------------------
+export function createVisiblePoller(tick, { doc, win, intervalMs = 5000 }) {
+  let intervalId = null
+  const start = () => {
+    if (intervalId != null) return
+    tick()
+    intervalId = win.setInterval(tick, intervalMs)
+  }
+  const stop = () => {
+    if (intervalId != null) {
+      win.clearInterval(intervalId)
+      intervalId = null
+    }
+  }
+  const onVisibility = () => {
+    if (doc.visibilityState === 'visible') start()
+    else stop()
+  }
+  if (doc.visibilityState === 'visible') start()
+  win.addEventListener('focus', tick)
+  doc.addEventListener('visibilitychange', onVisibility)
+  return () => {
+    stop()
+    win.removeEventListener('focus', tick)
+    doc.removeEventListener('visibilitychange', onVisibility)
+  }
+}
