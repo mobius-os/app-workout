@@ -24,6 +24,8 @@ import React, {
 // `icon` is a Tabler icon KEY (e.g. 'barbell'), not a glyph: logic.js stays
 // pure (no JSX/SVG), so the rendering layer (index.jsx) maps the key to inline
 // Tabler SVG markup. The keys below all resolve to real Tabler outline icons.
+// They are per-CATEGORY fallbacks — sportIconKey (below) refines the icon from
+// the activity name, so entries usually carry a more specific key than these.
 const CATEGORIES = {
   strength: { label: 'Strength', icon: 'barbell', color: '#6366f1', family: 'strength' },
   cardio: { label: 'Cardio', icon: 'heartbeat', color: '#ef4444', family: 'cardio' },
@@ -31,7 +33,7 @@ const CATEGORIES = {
   cycling: { label: 'Cycling', icon: 'bike', color: '#14b8a6', family: 'cardio' },
   swimming: { label: 'Swimming', icon: 'swimming', color: '#06b6d4', family: 'cardio' },
   rowing: { label: 'Rowing', icon: 'kayak', color: '#3b82f6', family: 'cardio' },
-  hiking: { label: 'Hiking', icon: 'mountain', color: '#10b981', family: 'cardio' },
+  hiking: { label: 'Hiking', icon: 'trekking', color: '#10b981', family: 'cardio' },
   yoga: { label: 'Yoga', icon: 'yoga', color: '#8b5cf6', family: 'other' },
   sport: { label: 'Sport', icon: 'ball-football', color: '#ec4899', family: 'other' },
   other: { label: 'Other', icon: 'sparkles', color: '#a1a1aa', family: 'other' },
@@ -45,6 +47,103 @@ const CATEGORY_KEYS = Object.keys(CATEGORIES)
 // it here at normalize time rather than trusting the model's `family`.
 function categoryFamily(category) {
   return CATEGORIES[category]?.family || 'other'
+}
+
+// ---------------------------------------------------------------------------
+// Sport-icon matcher — picks an icon from the activity NAME, not just the
+// category, so "Tennis" filed under the generic `sport` category gets a tennis
+// ball and a "Morning Run" filed under plain `cardio` gets the runner. Pure
+// keyword data + one matcher; index.jsx maps the returned key to inline SVG
+// (no external fetches — CSP + offline).
+//
+// Matching is on whole words with a trailing-s strip ("Squats" hits "squat");
+// multi-word keywords match as phrases. Rules run in order and the first hit
+// wins, so gym-lift vocabulary is checked before sport words — "Barbell Row"
+// stays a lift, it never becomes rowing. A rule with `family` applies only to
+// entries whose category maps to that metric family; that is how the bare word
+// "row" resolves to the barbell for strength entries and to the rowing icon
+// for everything else. No keyword hit → the entry's category icon.
+// ---------------------------------------------------------------------------
+
+const SPORT_ICON_RULES = [
+  { icon: 'barbell', family: 'strength', words: ['row'] },
+  { icon: 'barbell', words: [
+    'bench', 'press', 'squat', 'deadlift', 'rdl', 'ohp', 'curl', 'barbell',
+    'dumbbell', 'kettlebell', 'snatch', 'clean', 'jerk', 'thruster', 'lunge',
+    'pull', 'pullup', 'chinup', 'pulldown', 'push', 'pushup', 'pushdown',
+    'dip', 'shrug', 'raise', 'extension', 'fly', 'flye', 'plank', 'crunch',
+    'situp', 'lift', 'weights', 'hypertrophy',
+  ] },
+  { icon: 'run', words: ['run', 'running', 'jog', 'jogging', 'sprint', 'marathon', 'parkrun', 'track'] },
+  { icon: 'bike', words: ['bike', 'biking', 'cycling', 'cycle', 'ride', 'riding', 'spin', 'spinning', 'mtb', 'peloton', 'velodrome'] },
+  { icon: 'swimming', words: ['swim', 'swimming', 'freestyle', 'breaststroke', 'backstroke', 'butterfly', 'pool', 'laps'] },
+  { icon: 'kayak', words: ['rowing', 'row', 'erg', 'ergometer', 'kayak', 'canoe', 'paddle', 'paddling', 'sup'] },
+  { icon: 'mountain', words: ['climb', 'climbing', 'boulder', 'bouldering', 'crag', 'belay', 'mountaineering'] },
+  { icon: 'trekking', words: ['hike', 'hiking', 'trek', 'trekking', 'ruck', 'rucking', 'trail'] },
+  { icon: 'walk', words: ['walk', 'walking', 'stroll', 'steps'] },
+  { icon: 'yoga', words: ['yoga', 'pilates', 'meditation', 'vinyasa', 'hatha', 'breathwork'] },
+  { icon: 'stretching', words: ['stretch', 'stretching', 'mobility', 'foam', 'warmup', 'cooldown'] },
+  { icon: 'jump-rope', words: ['skipping', 'jump rope', 'jumprope', 'double unders'] },
+  { icon: 'karate', words: ['boxing', 'kickboxing', 'mma', 'karate', 'judo', 'bjj', 'jiu', 'taekwondo', 'muay', 'sparring', 'martial', 'wrestling'] },
+  { icon: 'ball-basketball', words: ['basketball', 'hoops', 'netball'] },
+  { icon: 'ball-tennis', words: ['tennis', 'padel', 'squash', 'badminton', 'pickleball', 'racquetball'] },
+  { icon: 'ball-football', words: ['football', 'soccer', 'futsal', 'rugby', 'volleyball', 'handball', 'hockey', 'golf', 'cricket', 'baseball'] },
+  { icon: 'treadmill', words: ['treadmill', 'elliptical', 'stairmaster', 'stepmill', 'stairs'] },
+  { icon: 'heartbeat', words: ['hiit', 'cardio', 'conditioning', 'circuit', 'metcon', 'intervals', 'tabata', 'crossfit', 'wod'] },
+]
+
+// Per-icon accent so the same sport is the same color everywhere it appears,
+// independent of which category the entry was filed under. Category-level
+// charts (volume bars, stat tiles) keep CATEGORIES[*].color — they aggregate
+// categories, not sports.
+const SPORT_ICON_COLORS = {
+  barbell: '#6366f1',
+  heartbeat: '#ef4444',
+  run: '#f97316',
+  bike: '#14b8a6',
+  swimming: '#06b6d4',
+  kayak: '#3b82f6',
+  trekking: '#10b981',
+  walk: '#84cc16',
+  mountain: '#f59e0b',
+  yoga: '#8b5cf6',
+  stretching: '#a78bfa',
+  'jump-rope': '#fb7185',
+  karate: '#e11d48',
+  'ball-football': '#ec4899',
+  'ball-basketball': '#ea580c',
+  'ball-tennis': '#a3e635',
+  treadmill: '#f87171',
+  sparkles: '#a1a1aa',
+}
+
+function sportIconKey(activity, category) {
+  const cat = CATEGORY_KEYS.includes(category) ? category : 'other'
+  const text = (typeof activity === 'string' ? activity : '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+  const tokens = new Set()
+  for (const word of text.split(' ')) {
+    if (!word) continue
+    tokens.add(word)
+    if (word.length > 3 && word.endsWith('s')) tokens.add(word.slice(0, -1))
+  }
+  const family = categoryFamily(cat)
+  for (const rule of SPORT_ICON_RULES) {
+    if (rule.family && rule.family !== family) continue
+    for (const word of rule.words) {
+      const hit = word.includes(' ')
+        ? ` ${text} `.includes(` ${word} `)
+        : tokens.has(word)
+      if (hit) return rule.icon
+    }
+  }
+  return CATEGORIES[cat].icon
+}
+
+function sportIconColor(icon, category) {
+  return SPORT_ICON_COLORS[icon] || CATEGORIES[category]?.color || CATEGORIES.other.color
 }
 
 // Default gap (ms) that splits one session from the next. Two entries within
@@ -221,16 +320,17 @@ function normalizeEntry(parsed, opts = {}) {
     }
   }
 
+  const activity = (typeof parsed?.activity === 'string' && parsed.activity.trim())
+    ? parsed.activity.trim()
+    : CATEGORIES[category].label
   return {
     id: opts.id || uid(),
     ts,
     localDate: localDate(at),
     sessionId: opts.sessionId || null, // assigned by assignSession at commit
     category,
-    activity: (typeof parsed?.activity === 'string' && parsed.activity.trim())
-      ? parsed.activity.trim()
-      : CATEGORIES[category].label,
-    icon: CATEGORIES[category].icon, // app owns the icon, ignore parsed.icon
+    activity,
+    icon: sportIconKey(activity, category), // app owns the icon, ignore parsed.icon
     metrics,
     raw: opts.raw || '',
     source: opts.source || 'ai',
@@ -296,14 +396,15 @@ function normalizeStoredEntry(entry) {
     }
   }
 
+  const activity = textOrNull(entry.activity) || CATEGORIES[category].label
   return {
     id: textOrNull(entry.id) || uid(),
     ts,
     localDate: textOrNull(entry.localDate) || localDate(new Date(ts)),
     sessionId: textOrNull(entry.sessionId) || null,
     category,
-    activity: textOrNull(entry.activity) || CATEGORIES[category].label,
-    icon: CATEGORIES[category].icon,
+    activity,
+    icon: sportIconKey(activity, category),
     metrics,
     raw: typeof entry.raw === 'string' ? entry.raw : '',
     source: textOrNull(entry.source) || 'ai',
@@ -614,13 +715,14 @@ function exerciseList(entries) {
     const key = exerciseKey(e.category, e.activity)
     let row = byKey.get(key)
     if (!row) {
+      const icon = sportIconKey(e.activity, e.category)
       row = {
         key,
         activity: e.activity,
         category: e.category,
         family: categoryFamily(e.category),
-        icon: CATEGORIES[e.category]?.icon || CATEGORIES.other.icon,
-        color: CATEGORIES[e.category]?.color || CATEGORIES.other.color,
+        icon,
+        color: sportIconColor(icon, e.category),
         entries: 0,
         sessionIds: new Set(),
         lastTs: 0,
@@ -793,16 +895,16 @@ function exerciseDetail(entries, category, activity) {
   const mine = (entries || []).filter((e) => exerciseKey(e.category, e.activity) === key)
   if (mine.length === 0) return null
   const family = categoryFamily(category)
-  const cat = CATEGORIES[category] || CATEGORIES.other
   const sessions = groupSessions(mine) // ascending by startTs
   const points = sessions.map((s) => exerciseSessionPoint(s, family))
+  const icon = sportIconKey(activity, category)
   return {
     key,
     activity: mine[mine.length - 1].activity || activity,
     category,
     family,
-    icon: cat.icon,
-    color: cat.color,
+    icon,
+    color: sportIconColor(icon, category),
     entryCount: mine.length,
     sessionCount: sessions.length,
     firstTs: sessions.length ? sessions[0].startTs : null,
@@ -923,7 +1025,7 @@ function migrateLegacyState(oldState) {
         sessionId,
         category: 'strength',
         activity: exercise,
-        icon: CATEGORIES.strength.icon,
+        icon: sportIconKey(exercise, 'strength'),
         metrics: { sets },
         raw: row.notes || '',
         source: 'migration',
@@ -1020,12 +1122,13 @@ function recentExercises(entries, n = 5) {
   for (const e of sorted) {
     const key = exerciseKey(e.category, e.activity)
     if (!seen.has(key)) {
+      const icon = sportIconKey(e.activity, e.category)
       seen.set(key, {
         key,
         category: e.category,
         activity: e.activity,
-        icon: CATEGORIES[e.category]?.icon || CATEGORIES.other.icon,
-        color: CATEGORIES[e.category]?.color || CATEGORIES.other.color,
+        icon,
+        color: sportIconColor(icon, e.category),
         lastTs: e.ts,
       })
     }
@@ -1070,6 +1173,8 @@ export {
   summarizeMetrics,
   lastEntryForExercise,
   recentExercises,
+  sportIconKey,
+  sportIconColor,
 }
 // ===== INLINE-LOGIC END =====
 
@@ -1089,11 +1194,13 @@ function readChatHeight(appId) {
 }
 
 // ---------------------------------------------------------------------------
-// Category icons — the rendering half of CATEGORIES. logic.js stores a Tabler
-// icon KEY per category (it stays JSX-free); this map turns that key into the
-// inline SVG inner markup, copied verbatim from Tabler's outline set. Drawn
-// with the shared <SportIcon> below so every render site picks up the same
-// stroke/sizing.
+// Sport + chrome icons — the rendering half of logic.js's icon keys. logic.js
+// stores a Tabler icon KEY per entry (it stays JSX-free; sportIconKey picks
+// the key from the activity name); this map turns that key into the inline
+// SVG inner markup, copied verbatim from Tabler's outline set. Drawn with the
+// shared <SportIcon> below so every render site picks up the same
+// stroke/sizing. history / chart-bar / stopwatch are app chrome (tab bar),
+// not sport keys.
 // Icons: Tabler Icons (MIT) — https://tabler.io/icons
 const ICONS = {
   barbell: (
@@ -1170,6 +1277,95 @@ const ICONS = {
   sparkles: (
     <>
       <path d="M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m-7 12a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6" />
+    </>
+  ),
+  trekking: (
+    <>
+      <path d="M12 4m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+      <path d="M7 21l2 -4" />
+      <path d="M13 21v-4l-3 -3l1 -6l3 4l3 2" />
+      <path d="M10 14l-1.827 -1.218a2 2 0 0 1 -.831 -2.15l.28 -1.117a2 2 0 0 1 1.939 -1.515h1.439l4 1l3 -2" />
+      <path d="M17 12v9" />
+      <path d="M16 20h2" />
+    </>
+  ),
+  walk: (
+    <>
+      <path d="M13 4m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+      <path d="M7 21l3 -4" />
+      <path d="M16 21l-2 -4l-3 -3l1 -6" />
+      <path d="M6 12l2 -3l4 -1l3 3l3 1" />
+    </>
+  ),
+  stretching: (
+    <>
+      <path d="M11 4a1 1 0 1 0 2 0a1 1 0 0 0 -2 0" />
+      <path d="M6.5 21l3.5 -5" />
+      <path d="M5 11l7 -2" />
+      <path d="M16 21l-4 -7v-5l7 -4" />
+    </>
+  ),
+  'jump-rope': (
+    <>
+      <path d="M6 14v-6a3 3 0 1 1 6 0v8a3 3 0 0 0 6 0v-6" />
+      <path d="M16 3m0 2a2 2 0 0 1 2 -2h0a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h0a2 2 0 0 1 -2 -2z" />
+      <path d="M4 14m0 2a2 2 0 0 1 2 -2h0a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h0a2 2 0 0 1 -2 -2z" />
+    </>
+  ),
+  karate: (
+    <>
+      <path d="M18 4m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+      <path d="M3 9l4.5 1l3 2.5" />
+      <path d="M13 21v-8l3 -5.5" />
+      <path d="M8 4.5l4 2l4 1l4 3.5l-2 3.5" />
+    </>
+  ),
+  'ball-basketball': (
+    <>
+      <path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
+      <path d="M5.65 5.65l12.7 12.7" />
+      <path d="M5.65 18.35l12.7 -12.7" />
+      <path d="M12 3a9 9 0 0 0 9 9" />
+      <path d="M3 12a9 9 0 0 1 9 9" />
+    </>
+  ),
+  'ball-tennis': (
+    <>
+      <path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
+      <path d="M6 5.3a9 9 0 0 1 0 13.4" />
+      <path d="M18 5.3a9 9 0 0 0 0 13.4" />
+    </>
+  ),
+  treadmill: (
+    <>
+      <path d="M10 3a1 1 0 1 0 2 0a1 1 0 0 0 -2 0" />
+      <path d="M3 14l4 1l.5 -.5" />
+      <path d="M12 18v-3l-3 -2.923l.75 -5.077" />
+      <path d="M6 10v-2l4 -1l2.5 2.5l2.5 .5" />
+      <path d="M21 22a1 1 0 0 0 -1 -1h-16a1 1 0 0 0 -1 1" />
+      <path d="M18 21l1 -11l2 -1" />
+    </>
+  ),
+  history: (
+    <>
+      <path d="M12 8l0 4l2 2" />
+      <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5" />
+    </>
+  ),
+  'chart-bar': (
+    <>
+      <path d="M3 13a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" />
+      <path d="M15 9a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" />
+      <path d="M9 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z" />
+      <path d="M4 20h14" />
+    </>
+  ),
+  stopwatch: (
+    <>
+      <path d="M5 13a7 7 0 1 0 14 0a7 7 0 0 0 -14 0z" />
+      <path d="M14.5 10.5l-2.5 2.5" />
+      <path d="M17 8l1 -1" />
+      <path d="M14 3h-4" />
     </>
   ),
 }
@@ -1302,7 +1498,7 @@ function workoutAgentPrompt(appId) {
     '  "sessionId": "session-<startedAt>",',
     '  "category": "strength|cardio|running|cycling|swimming|rowing|hiking|yoga|sport|other",',
     '  "activity": "Deadlift",',
-    '  "icon": "barbell|heartbeat|run|bike|swimming|kayak|mountain|yoga|ball-football|sparkles",',
+    '  "icon": "(optional — the app derives the icon from activity + category)",',
     '  "metrics": { ... },',
     '  "raw": "the user text that caused/updated this entry",',
     '  "source": "ai",',
@@ -1317,8 +1513,6 @@ function workoutAgentPrompt(appId) {
     '- strength metrics: {"sets":[{"weight_kg": number, "reps": number, "unit":"kg"|"lb"}]}. Strength requires exercise name, at least one set, and every set needs both reps and weight. Convert lb to weight_kg but keep unit as "lb" for display. If the user gives sets without reps/weight, ask before adding. If the user gives reps/weight without the exercise, ask before adding.',
     '- cardio/running/cycling/swimming/rowing/hiking metrics: {"duration_s": number|null, "distance_m": number|null, "elevation_m": number|null, "location": string|null}. These require the activity plus at least one of duration_s or distance_m. Convert miles/mi/km/m to metres and hours/minutes/seconds to seconds.',
     '- yoga/sport/other metrics: {"duration_s": number|null, "location": string|null, "note": string|null}. These require activity plus duration_s or a useful note/location.',
-    '',
-    'Icon keys by category: strength=barbell, cardio=heartbeat, running=run, cycling=bike, swimming=swimming, rowing=kayak, hiking=mountain, yoga=yoga, sport=ball-football, other=sparkles.',
     '',
     'Question behavior:',
     '- If a required field is missing, do not add an incomplete entry. Ask one',
@@ -1505,24 +1699,24 @@ const CSS = `
 .wk-btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
 /* /mobius-ui:Button */
 
-/* Entry feed card — app-specific list row with a per-category icon tile. */
+/* Entry feed card — app-specific list row with a per-sport icon tile. Tight
+   rows: the icon names the sport, the meta line carries the key numbers. */
 .wk-entry-card {
   display: flex; align-items: center; gap: 10px;
-  padding: 10px; margin-bottom: 8px;
+  padding: 9px 10px; margin-bottom: 6px;
   background: color-mix(in srgb, var(--surface) 94%, #000);
   border: 1px solid var(--border); border-radius: 8px;
 }
 .wk-entry-card.is-draft { background: color-mix(in srgb, var(--bg) 62%, var(--surface)); }
 .wk-entry-icon {
-  width: 34px; height: 34px; flex-shrink: 0; border-radius: 8px;
+  width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px;
   display: flex; align-items: center; justify-content: center; font-size: 18px;
 }
 .wk-entry-body { flex: 1; min-width: 0; }
 .wk-entry-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.wk-entry-name { margin: 0; font-size: 15px; font-weight: 760; letter-spacing: 0; }
+.wk-entry-name { margin: 0; font-size: 14px; font-weight: 760; letter-spacing: 0; }
 .wk-entry-time { font-size: 12px; color: var(--muted); white-space: nowrap; }
-.wk-entry-meta { margin: 5px 0 0; font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; }
-.wk-entry-raw { margin: 6px 0 0; font-size: 12px; color: var(--muted); font-style: italic; }
+.wk-entry-meta { margin: 3px 0 0; font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .wk-entry-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .wk-icon-btn {
   width: 32px; height: 32px; border-radius: 8px;
@@ -1537,16 +1731,37 @@ const CSS = `
 }
 .wk-icon-btn.is-accent { color: var(--accent); }
 
-/* Current-session draft panel — app-specific. */
+/* Current-session draft panel — app-specific. The is-live treatment (accent
+   wash + pulsing dot + ticking elapsed time) makes the in-progress workout
+   read as the one live thing on the screen. */
 .wk-current-session {
   margin-bottom: 14px; overflow: hidden;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.wk-current-session.is-live {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 9%, var(--surface)), var(--surface) 60%);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .wk-current-session-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 12px; border-bottom: 1px solid var(--border);
 }
-.wk-current-session-title { margin: 0; font-size: 14px; line-height: 1.25; font-weight: 800; letter-spacing: 0; user-select: none; }
+.wk-current-session-title {
+  margin: 0; display: flex; align-items: center;
+  font-size: 14px; line-height: 1.25; font-weight: 800; letter-spacing: 0; user-select: none;
+}
+.wk-live-dot {
+  width: 8px; height: 8px; flex-shrink: 0; border-radius: 999px;
+  margin-right: 7px; background: var(--accent);
+}
+@keyframes wk-live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent); }
+  60% { box-shadow: 0 0 0 6px transparent; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wk-live-dot { animation: wk-live-pulse 2.2s ease-in-out infinite; }
+}
 .wk-current-session-sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; user-select: none; }
 .wk-current-session-list { padding: 8px 10px 2px; }
 .wk-current-session-empty { padding: 16px 12px; color: var(--muted); font-size: 13px; }
@@ -1570,7 +1785,6 @@ const CSS = `
   user-select: none;
 }
 .wk-session-date { color: var(--text); font-size: 13px; font-weight: 800; letter-spacing: 0; user-select: none; }
-.wk-session-span { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; }
 
 /* mobius-ui:Input v1 — keep in sync; library candidate. Diverge below the marker only. */
 .wk-input {
@@ -2404,11 +2618,13 @@ function QuickAddStrip({ entries, onQuickAdd }) {
 
 function EntryCard({ entry, onDelete, onEdit }) {
   const cat = CATEGORIES[entry.category] || CATEGORIES.other
+  const icon = entry.icon || cat.icon
+  const color = sportIconColor(icon, entry.category)
   const time = new Date(entry.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   return (
     <div className="wk-entry-card">
-      <div className="wk-entry-icon" style={{ background: `${cat.color}22`, border: `1px solid ${cat.color}55` }} aria-hidden>
-        <SportIcon name={entry.icon || cat.icon} color={cat.color} />
+      <div className="wk-entry-icon" style={{ background: `${color}22`, border: `1px solid ${color}55` }} aria-hidden>
+        <SportIcon name={icon} color={color} size={18} />
       </div>
       <div className="wk-entry-body">
         <div className="wk-entry-top">
@@ -2437,10 +2653,12 @@ function EntryCard({ entry, onDelete, onEdit }) {
 
 function SessionDraftCard({ entry }) {
   const cat = CATEGORIES[entry.category] || CATEGORIES.other
+  const icon = entry.icon || cat.icon
+  const color = sportIconColor(icon, entry.category)
   return (
     <div className="wk-entry-card is-draft">
-      <div className="wk-entry-icon" style={{ background: `${cat.color}22`, border: `1px solid ${cat.color}55` }} aria-hidden>
-        <SportIcon name={entry.icon || cat.icon} color={cat.color} />
+      <div className="wk-entry-icon" style={{ background: `${color}22`, border: `1px solid ${color}55` }} aria-hidden>
+        <SportIcon name={icon} color={color} size={18} />
       </div>
       <div className="wk-entry-body">
         <div className="wk-entry-top">
@@ -2458,18 +2676,27 @@ function CurrentSessionPanel({ session, onFinish, finishing = false }) {
   const entries = normalized?.entries || []
   const ready = currentSessionReady(normalized) && !finishing
   const missing = entries.map(sessionEntryMissing).filter(Boolean)
-  const started = normalized?.startedAt
-    ? new Date(normalized.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  // Ticking clock makes the card read as live: elapsed time since startedAt,
+  // refreshed every 30s (cheap; unmounts with the panel when no session).
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000)
+    return () => clearInterval(timer)
+  }, [])
+  const elapsed = normalized?.startedAt && now > normalized.startedAt
+    ? fmtDuration((now - normalized.startedAt) / 1000)
     : null
   return (
-    <section className="wk-current-session" aria-label="Current session">
+    <section className="wk-current-session is-live" aria-label="Current session">
       <div className="wk-current-session-head">
         <div style={{ minWidth: 0 }}>
-          <h3 className="wk-current-session-title">Current session</h3>
+          <h3 className="wk-current-session-title">
+            <span className="wk-live-dot" aria-hidden />Live session
+          </h3>
           <p className="wk-current-session-sub">
             {entries.length > 0
-              ? `${entries.length} ${entries.length === 1 ? 'activity' : 'activities'}${started ? ` · started ${started}` : ''}`
-              : 'No active activities yet'}
+              ? `${entries.length} ${entries.length === 1 ? 'activity' : 'activities'}${elapsed ? ` · ${elapsed}` : ''}`
+              : 'No activities yet'}
           </p>
         </div>
         <button
@@ -2488,7 +2715,7 @@ function CurrentSessionPanel({ session, onFinish, finishing = false }) {
           {entries.map((entry) => <SessionDraftCard key={entry.id} entry={entry} />)}
         </div>
       ) : (
-        <div className="wk-current-session-empty">No activities in this session yet.</div>
+        <div className="wk-current-session-empty">Add an activity with Quick add, or tell the chat what you did.</div>
       )}
       {missing.length > 0 && (
         <p className="wk-current-session-missing">Missing: {missing.join(', ')}.</p>
@@ -2497,48 +2724,10 @@ function CurrentSessionPanel({ session, onFinish, finishing = false }) {
   )
 }
 
-function LogTab({ entries, onDelete, onEdit, onQuickAdd }) {
-  const groups = useMemo(() => groupEntriesByDate(entries), [entries])
-  if (entries.length === 0) {
-    return (
-      <>
-        <QuickAddStrip entries={entries} onQuickAdd={onQuickAdd} />
-        <div className="wk-empty">
-          <div className="wk-empty-icon">
-            <SportIcon name="barbell" color="var(--accent)" size={30} />
-          </div>
-          <strong style={{ color: 'var(--text)' }}>No workouts yet.</strong>
-        </div>
-      </>
-    )
-  }
-  const todayIso = localDate()
-  return (
-    <div>
-      <QuickAddStrip entries={entries} onQuickAdd={onQuickAdd} />
-      {groups.map((group) => {
-        const dateLabel = group.date === todayIso
-          ? 'Today'
-          : new Date(`${group.date}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
-        return (
-          <div key={group.date}>
-            <div className="wk-session-label">
-              <span className="wk-session-date">{dateLabel}</span>
-              <span className="wk-session-span">{group.entries.length} entr{group.entries.length === 1 ? 'y' : 'ies'}</span>
-            </div>
-            {group.entries.map((e) => (
-              <EntryCard key={e.id} entry={e} onDelete={onDelete} onEdit={onEdit} />
-            ))}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 // ---------------------------------------------------------------------------
-// Streak heatmap — hand-rolled SVG. 53×7 calendar; days with any entry tint
-// with the accent.
+// Streak heatmap — hand-rolled SVG. 26×7 calendar (half a year — a full 53
+// weeks renders ~7px cells on a phone, too small to read); days with any
+// entry tint with the accent.
 // ---------------------------------------------------------------------------
 
 function Heatmap({ entries }) {
@@ -2548,8 +2737,9 @@ function Heatmap({ entries }) {
   const lastSunday = new Date(today)
   lastSunday.setDate(today.getDate() - dow)
 
+  const WEEKS = 26
   const weeks = []
-  for (let w = 52; w >= 0; w--) {
+  for (let w = WEEKS - 1; w >= 0; w--) {
     const week = []
     for (let d = 0; d < 7; d++) {
       const cell = new Date(lastSunday)
@@ -2560,11 +2750,12 @@ function Heatmap({ entries }) {
     weeks.push(week)
   }
   const cell = 11, gap = 2
-  const W = 53 * (cell + gap), H = 7 * (cell + gap)
-  const count = days.size
+  const W = WEEKS * (cell + gap), H = 7 * (cell + gap)
+  // Count within the rendered window so the label matches what's drawn.
+  const count = weeks.flat().filter((d) => d.has).length
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="wk-heatmap" preserveAspectRatio="xMidYMid meet"
-      role="img" aria-label={`Activity heatmap: ${count} active day${count === 1 ? '' : 's'} in the last 53 weeks`}>
+      role="img" aria-label={`Activity heatmap: ${count} active day${count === 1 ? '' : 's'} in the last ${WEEKS} weeks`}>
       {weeks.map((week, wi) => week.map((d, di) => (
         <rect key={`${wi}-${di}`}
           x={wi * (cell + gap)} y={di * (cell + gap)} width={cell} height={cell} rx={2}
@@ -2891,7 +3082,6 @@ function ExerciseDetailSheet({ detail, onClose }) {
 
           <div className="wk-chart-card is-last">
             <h3 className="wk-chart-title">History</h3>
-            <p className="wk-chart-sub">Every session, newest first.</p>
             <div className="wk-hist-list">
               {history.map((p, i) => (
                 <div key={`${p.ts}-${i}`} className={`wk-hist-row${i === history.length - 1 ? ' is-last' : ''}`}>
@@ -2949,9 +3139,11 @@ function CategoryStats({ stats }) {
     <div className="wk-stat-grid">
       {stats.map((row) => {
         const fam = categoryFamily(row.category)
+        // A duration-only cardio category (e.g. HIIT) would read "0 km";
+        // fall back to minutes when no distance was ever logged.
         const volume = fam === 'strength'
           ? `${Math.round(row.strengthVolume)} kg-reps`
-          : fam === 'cardio'
+          : fam === 'cardio' && row.distanceKm > 0
             ? `${Math.round(row.distanceKm * 10) / 10} km`
             : `${Math.round(row.durationMin)} min`
         return (
@@ -3019,7 +3211,7 @@ function InsightsTab({ entries }) {
       {prs.length > 0 && (
         <div className="wk-chart-card">
           <h3 className="wk-chart-title">Strength PRs</h3>
-          <p className="wk-chart-sub">Best estimated 1RM per lift. Tap to see the trend.</p>
+          <p className="wk-chart-sub">Best estimated 1RM per lift.</p>
           <table className="wk-pr-table">
             <thead>
               <tr>
@@ -3052,7 +3244,7 @@ function InsightsTab({ entries }) {
       {cardio.length > 0 && (
         <div className="wk-chart-card">
           <h3 className="wk-chart-title">Cardio bests</h3>
-          <p className="wk-chart-sub">Longest distance and duration per activity. Tap one for its trend.</p>
+          <p className="wk-chart-sub">Longest distance and duration per activity.</p>
           <table className="wk-pr-table">
             <thead>
               <tr>
@@ -3085,7 +3277,7 @@ function InsightsTab({ entries }) {
       {exercises.length > 0 && (
         <div className="wk-chart-card">
           <h3 className="wk-chart-title">Exercises</h3>
-          <p className="wk-chart-sub">Tap any exercise for its trend, records, and full history.</p>
+          <p className="wk-chart-sub">Tap an exercise for its trend, records, and history.</p>
           <table className="wk-pr-table">
             <thead>
               <tr>
@@ -3137,9 +3329,9 @@ function AllTab({ entries, onDelete, onEdit }) {
     return (
       <div className="wk-empty">
         <div className="wk-empty-icon">
-          <SportIcon name="sparkles" color="var(--accent)" size={30} />
+          <SportIcon name="history" color="var(--accent)" size={30} />
         </div>
-        No entries yet.
+        No entries yet. Finish a session and it lands here.
       </div>
     )
   }
@@ -3155,7 +3347,6 @@ function AllTab({ entries, onDelete, onEdit }) {
           <div key={group.date}>
             <div className="wk-session-label">
               <span className="wk-session-date">{dateLabel}</span>
-              <span className="wk-session-span">{group.entries.length} entr{group.entries.length === 1 ? 'y' : 'ies'}</span>
             </div>
             {group.entries.map((e) => (
               <EntryCard key={e.id} entry={e} onDelete={onDelete} onEdit={onEdit} />
@@ -3565,15 +3756,15 @@ export default function App({ appId, token }) {
         <nav className="wk-tabbar" role="tablist" aria-label="Activity tabs">
           <button className={`wk-tab-btn${tab === 'session' ? ' is-active' : ''}`} onClick={() => setTab('session')}
             role="tab" aria-selected={tab === 'session'} aria-label="Session">
-            <span className="wk-tab-icon" aria-hidden>✎</span>Session
+            <span className="wk-tab-icon" aria-hidden><SportIcon name="stopwatch" size={15} /></span>Session
           </button>
           <button className={`wk-tab-btn${tab === 'history' ? ' is-active' : ''}`} onClick={() => setTab('history')}
             role="tab" aria-selected={tab === 'history'} aria-label="History">
-            <span className="wk-tab-icon" aria-hidden>≣</span>History
+            <span className="wk-tab-icon" aria-hidden><SportIcon name="history" size={15} /></span>History
           </button>
           <button className={`wk-tab-btn${tab === 'insights' ? ' is-active' : ''}`} onClick={() => setTab('insights')}
             role="tab" aria-selected={tab === 'insights'} aria-label="Insights">
-            <span className="wk-tab-icon" aria-hidden>▦</span>Insights
+            <span className="wk-tab-icon" aria-hidden><SportIcon name="chart-bar" size={15} /></span>Insights
           </button>
         </nav>
       )}

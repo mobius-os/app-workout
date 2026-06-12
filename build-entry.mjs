@@ -28,6 +28,8 @@ const TEST_EXPORTS = [
   'summarizeMetrics',
   'lastEntryForExercise',
   'recentExercises',
+  'sportIconKey',
+  'sportIconColor',
 ]
 
 export function stripExports(logicSource) {

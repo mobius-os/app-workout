@@ -16,6 +16,8 @@
 // `icon` is a Tabler icon KEY (e.g. 'barbell'), not a glyph: logic.js stays
 // pure (no JSX/SVG), so the rendering layer (index.jsx) maps the key to inline
 // Tabler SVG markup. The keys below all resolve to real Tabler outline icons.
+// They are per-CATEGORY fallbacks — sportIconKey (below) refines the icon from
+// the activity name, so entries usually carry a more specific key than these.
 export const CATEGORIES = {
   strength: { label: 'Strength', icon: 'barbell', color: '#6366f1', family: 'strength' },
   cardio: { label: 'Cardio', icon: 'heartbeat', color: '#ef4444', family: 'cardio' },
@@ -23,7 +25,7 @@ export const CATEGORIES = {
   cycling: { label: 'Cycling', icon: 'bike', color: '#14b8a6', family: 'cardio' },
   swimming: { label: 'Swimming', icon: 'swimming', color: '#06b6d4', family: 'cardio' },
   rowing: { label: 'Rowing', icon: 'kayak', color: '#3b82f6', family: 'cardio' },
-  hiking: { label: 'Hiking', icon: 'mountain', color: '#10b981', family: 'cardio' },
+  hiking: { label: 'Hiking', icon: 'trekking', color: '#10b981', family: 'cardio' },
   yoga: { label: 'Yoga', icon: 'yoga', color: '#8b5cf6', family: 'other' },
   sport: { label: 'Sport', icon: 'ball-football', color: '#ec4899', family: 'other' },
   other: { label: 'Other', icon: 'sparkles', color: '#a1a1aa', family: 'other' },
@@ -37,6 +39,103 @@ export const CATEGORY_KEYS = Object.keys(CATEGORIES)
 // it here at normalize time rather than trusting the model's `family`.
 export function categoryFamily(category) {
   return CATEGORIES[category]?.family || 'other'
+}
+
+// ---------------------------------------------------------------------------
+// Sport-icon matcher — picks an icon from the activity NAME, not just the
+// category, so "Tennis" filed under the generic `sport` category gets a tennis
+// ball and a "Morning Run" filed under plain `cardio` gets the runner. Pure
+// keyword data + one matcher; index.jsx maps the returned key to inline SVG
+// (no external fetches — CSP + offline).
+//
+// Matching is on whole words with a trailing-s strip ("Squats" hits "squat");
+// multi-word keywords match as phrases. Rules run in order and the first hit
+// wins, so gym-lift vocabulary is checked before sport words — "Barbell Row"
+// stays a lift, it never becomes rowing. A rule with `family` applies only to
+// entries whose category maps to that metric family; that is how the bare word
+// "row" resolves to the barbell for strength entries and to the rowing icon
+// for everything else. No keyword hit → the entry's category icon.
+// ---------------------------------------------------------------------------
+
+export const SPORT_ICON_RULES = [
+  { icon: 'barbell', family: 'strength', words: ['row'] },
+  { icon: 'barbell', words: [
+    'bench', 'press', 'squat', 'deadlift', 'rdl', 'ohp', 'curl', 'barbell',
+    'dumbbell', 'kettlebell', 'snatch', 'clean', 'jerk', 'thruster', 'lunge',
+    'pull', 'pullup', 'chinup', 'pulldown', 'push', 'pushup', 'pushdown',
+    'dip', 'shrug', 'raise', 'extension', 'fly', 'flye', 'plank', 'crunch',
+    'situp', 'lift', 'weights', 'hypertrophy',
+  ] },
+  { icon: 'run', words: ['run', 'running', 'jog', 'jogging', 'sprint', 'marathon', 'parkrun', 'track'] },
+  { icon: 'bike', words: ['bike', 'biking', 'cycling', 'cycle', 'ride', 'riding', 'spin', 'spinning', 'mtb', 'peloton', 'velodrome'] },
+  { icon: 'swimming', words: ['swim', 'swimming', 'freestyle', 'breaststroke', 'backstroke', 'butterfly', 'pool', 'laps'] },
+  { icon: 'kayak', words: ['rowing', 'row', 'erg', 'ergometer', 'kayak', 'canoe', 'paddle', 'paddling', 'sup'] },
+  { icon: 'mountain', words: ['climb', 'climbing', 'boulder', 'bouldering', 'crag', 'belay', 'mountaineering'] },
+  { icon: 'trekking', words: ['hike', 'hiking', 'trek', 'trekking', 'ruck', 'rucking', 'trail'] },
+  { icon: 'walk', words: ['walk', 'walking', 'stroll', 'steps'] },
+  { icon: 'yoga', words: ['yoga', 'pilates', 'meditation', 'vinyasa', 'hatha', 'breathwork'] },
+  { icon: 'stretching', words: ['stretch', 'stretching', 'mobility', 'foam', 'warmup', 'cooldown'] },
+  { icon: 'jump-rope', words: ['skipping', 'jump rope', 'jumprope', 'double unders'] },
+  { icon: 'karate', words: ['boxing', 'kickboxing', 'mma', 'karate', 'judo', 'bjj', 'jiu', 'taekwondo', 'muay', 'sparring', 'martial', 'wrestling'] },
+  { icon: 'ball-basketball', words: ['basketball', 'hoops', 'netball'] },
+  { icon: 'ball-tennis', words: ['tennis', 'padel', 'squash', 'badminton', 'pickleball', 'racquetball'] },
+  { icon: 'ball-football', words: ['football', 'soccer', 'futsal', 'rugby', 'volleyball', 'handball', 'hockey', 'golf', 'cricket', 'baseball'] },
+  { icon: 'treadmill', words: ['treadmill', 'elliptical', 'stairmaster', 'stepmill', 'stairs'] },
+  { icon: 'heartbeat', words: ['hiit', 'cardio', 'conditioning', 'circuit', 'metcon', 'intervals', 'tabata', 'crossfit', 'wod'] },
+]
+
+// Per-icon accent so the same sport is the same color everywhere it appears,
+// independent of which category the entry was filed under. Category-level
+// charts (volume bars, stat tiles) keep CATEGORIES[*].color — they aggregate
+// categories, not sports.
+export const SPORT_ICON_COLORS = {
+  barbell: '#6366f1',
+  heartbeat: '#ef4444',
+  run: '#f97316',
+  bike: '#14b8a6',
+  swimming: '#06b6d4',
+  kayak: '#3b82f6',
+  trekking: '#10b981',
+  walk: '#84cc16',
+  mountain: '#f59e0b',
+  yoga: '#8b5cf6',
+  stretching: '#a78bfa',
+  'jump-rope': '#fb7185',
+  karate: '#e11d48',
+  'ball-football': '#ec4899',
+  'ball-basketball': '#ea580c',
+  'ball-tennis': '#a3e635',
+  treadmill: '#f87171',
+  sparkles: '#a1a1aa',
+}
+
+export function sportIconKey(activity, category) {
+  const cat = CATEGORY_KEYS.includes(category) ? category : 'other'
+  const text = (typeof activity === 'string' ? activity : '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+  const tokens = new Set()
+  for (const word of text.split(' ')) {
+    if (!word) continue
+    tokens.add(word)
+    if (word.length > 3 && word.endsWith('s')) tokens.add(word.slice(0, -1))
+  }
+  const family = categoryFamily(cat)
+  for (const rule of SPORT_ICON_RULES) {
+    if (rule.family && rule.family !== family) continue
+    for (const word of rule.words) {
+      const hit = word.includes(' ')
+        ? ` ${text} `.includes(` ${word} `)
+        : tokens.has(word)
+      if (hit) return rule.icon
+    }
+  }
+  return CATEGORIES[cat].icon
+}
+
+export function sportIconColor(icon, category) {
+  return SPORT_ICON_COLORS[icon] || CATEGORIES[category]?.color || CATEGORIES.other.color
 }
 
 // Default gap (ms) that splits one session from the next. Two entries within
@@ -213,16 +312,17 @@ export function normalizeEntry(parsed, opts = {}) {
     }
   }
 
+  const activity = (typeof parsed?.activity === 'string' && parsed.activity.trim())
+    ? parsed.activity.trim()
+    : CATEGORIES[category].label
   return {
     id: opts.id || uid(),
     ts,
     localDate: localDate(at),
     sessionId: opts.sessionId || null, // assigned by assignSession at commit
     category,
-    activity: (typeof parsed?.activity === 'string' && parsed.activity.trim())
-      ? parsed.activity.trim()
-      : CATEGORIES[category].label,
-    icon: CATEGORIES[category].icon, // app owns the icon, ignore parsed.icon
+    activity,
+    icon: sportIconKey(activity, category), // app owns the icon, ignore parsed.icon
     metrics,
     raw: opts.raw || '',
     source: opts.source || 'ai',
@@ -288,14 +388,15 @@ function normalizeStoredEntry(entry) {
     }
   }
 
+  const activity = textOrNull(entry.activity) || CATEGORIES[category].label
   return {
     id: textOrNull(entry.id) || uid(),
     ts,
     localDate: textOrNull(entry.localDate) || localDate(new Date(ts)),
     sessionId: textOrNull(entry.sessionId) || null,
     category,
-    activity: textOrNull(entry.activity) || CATEGORIES[category].label,
-    icon: CATEGORIES[category].icon,
+    activity,
+    icon: sportIconKey(activity, category),
     metrics,
     raw: typeof entry.raw === 'string' ? entry.raw : '',
     source: textOrNull(entry.source) || 'ai',
@@ -606,13 +707,14 @@ export function exerciseList(entries) {
     const key = exerciseKey(e.category, e.activity)
     let row = byKey.get(key)
     if (!row) {
+      const icon = sportIconKey(e.activity, e.category)
       row = {
         key,
         activity: e.activity,
         category: e.category,
         family: categoryFamily(e.category),
-        icon: CATEGORIES[e.category]?.icon || CATEGORIES.other.icon,
-        color: CATEGORIES[e.category]?.color || CATEGORIES.other.color,
+        icon,
+        color: sportIconColor(icon, e.category),
         entries: 0,
         sessionIds: new Set(),
         lastTs: 0,
@@ -785,16 +887,16 @@ export function exerciseDetail(entries, category, activity) {
   const mine = (entries || []).filter((e) => exerciseKey(e.category, e.activity) === key)
   if (mine.length === 0) return null
   const family = categoryFamily(category)
-  const cat = CATEGORIES[category] || CATEGORIES.other
   const sessions = groupSessions(mine) // ascending by startTs
   const points = sessions.map((s) => exerciseSessionPoint(s, family))
+  const icon = sportIconKey(activity, category)
   return {
     key,
     activity: mine[mine.length - 1].activity || activity,
     category,
     family,
-    icon: cat.icon,
-    color: cat.color,
+    icon,
+    color: sportIconColor(icon, category),
     entryCount: mine.length,
     sessionCount: sessions.length,
     firstTs: sessions.length ? sessions[0].startTs : null,
@@ -915,7 +1017,7 @@ export function migrateLegacyState(oldState) {
         sessionId,
         category: 'strength',
         activity: exercise,
-        icon: CATEGORIES.strength.icon,
+        icon: sportIconKey(exercise, 'strength'),
         metrics: { sets },
         raw: row.notes || '',
         source: 'migration',
@@ -1012,12 +1114,13 @@ export function recentExercises(entries, n = 5) {
   for (const e of sorted) {
     const key = exerciseKey(e.category, e.activity)
     if (!seen.has(key)) {
+      const icon = sportIconKey(e.activity, e.category)
       seen.set(key, {
         key,
         category: e.category,
         activity: e.activity,
-        icon: CATEGORIES[e.category]?.icon || CATEGORIES.other.icon,
-        color: CATEGORIES[e.category]?.color || CATEGORIES.other.color,
+        icon,
+        color: sportIconColor(icon, e.category),
         lastTs: e.ts,
       })
     }

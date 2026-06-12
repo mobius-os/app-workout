@@ -18,6 +18,7 @@ import {
   appendEntryToCurrentSession,
   exerciseKey, exerciseList, exerciseDetail, paceSecPerKm, fmtPace,
   lastEntryForExercise, recentExercises,
+  sportIconKey, sportIconColor, SPORT_ICON_RULES, SPORT_ICON_COLORS, CATEGORIES,
 } from '../logic.js'
 import { buildEntry } from '../build-entry.mjs'
 
@@ -692,4 +693,74 @@ test('finish commits quick-add entries to history exactly once (no double-write)
   assert.equal(merged.filter((e) => e.activity === 'Overhead Press').length, 1)
   assert.equal(merged.filter((e) => e.activity === 'Pull-up').length, 1)
   assert.equal(merged.filter((e) => e.id === 'old-1').length, 1)
+})
+
+// --- sport-icon matcher ---
+
+test('sportIconKey maps lift names to the barbell regardless of wording', () => {
+  assert.equal(sportIconKey('Bench Press', 'strength'), 'barbell')
+  assert.equal(sportIconKey('Squats', 'strength'), 'barbell') // plural strip
+  assert.equal(sportIconKey('Kettlebell Swings', 'other'), 'barbell')
+})
+
+test('sportIconKey refines a generic category from the activity name', () => {
+  assert.equal(sportIconKey('Morning Run', 'cardio'), 'run')
+  assert.equal(sportIconKey('Evening Walk', 'hiking'), 'walk')
+  assert.equal(sportIconKey('Tennis', 'sport'), 'ball-tennis')
+  assert.equal(sportIconKey('Basketball', 'sport'), 'ball-basketball')
+  assert.equal(sportIconKey('Bouldering', 'sport'), 'mountain')
+  assert.equal(sportIconKey('Boxing', 'sport'), 'karate')
+  assert.equal(sportIconKey('Stretching', 'yoga'), 'stretching')
+  assert.equal(sportIconKey('Elliptical', 'cardio'), 'treadmill')
+})
+
+test('sportIconKey: "row" goes to the barbell for strength, rowing otherwise', () => {
+  assert.equal(sportIconKey('Barbell Row', 'strength'), 'barbell')
+  assert.equal(sportIconKey('Bent-over Rows', 'strength'), 'barbell')
+  assert.equal(sportIconKey('5k Row', 'cardio'), 'kayak')
+  assert.equal(sportIconKey('Rowing', 'rowing'), 'kayak')
+})
+
+test('sportIconKey matches multi-word keywords as phrases', () => {
+  assert.equal(sportIconKey('Jump rope', 'other'), 'jump-rope')
+  assert.equal(sportIconKey('Jump-rope intervals', 'cardio'), 'jump-rope')
+})
+
+test('sportIconKey falls back to the category icon, then generic', () => {
+  assert.equal(sportIconKey('Zone 2', 'cycling'), 'bike') // no keyword → category
+  assert.equal(sportIconKey('Mystery activity', 'other'), 'sparkles')
+  assert.equal(sportIconKey('Mystery activity', 'not-a-category'), 'sparkles')
+  assert.equal(sportIconKey(null, 'running'), 'run')
+})
+
+test('normalizeEntry stores the matcher icon, not just the category icon', () => {
+  const e = normalizeEntry({
+    category: 'sport',
+    activity: 'Tennis',
+    metrics: { duration: { value: 1, unit: 'h' } },
+  })
+  assert.equal(e.icon, 'ball-tennis')
+})
+
+test('every matcher icon has a color and an inline SVG glyph in index.jsx', () => {
+  const ruleIcons = new Set(SPORT_ICON_RULES.map((r) => r.icon))
+  const categoryIcons = new Set(Object.values(CATEGORIES).map((c) => c.icon))
+  const indexSource = readFileSync(join(here, '..', 'index.jsx'), 'utf8')
+  const block = indexSource.slice(
+    indexSource.indexOf('const ICONS = {'),
+    indexSource.indexOf('function SportIcon'),
+  )
+  const svgKeys = new Set(
+    [...block.matchAll(/^  '?([a-z0-9-]+)'?: \($/gm)].map((m) => m[1]),
+  )
+  for (const icon of [...ruleIcons, ...categoryIcons]) {
+    assert.ok(SPORT_ICON_COLORS[icon], `icon "${icon}" is missing from SPORT_ICON_COLORS`)
+    assert.ok(svgKeys.has(icon), `icon "${icon}" has no inline SVG in index.jsx ICONS`)
+  }
+})
+
+test('sportIconColor: per-icon color, else category color, else generic', () => {
+  assert.equal(sportIconColor('run', 'cardio'), SPORT_ICON_COLORS.run)
+  assert.equal(sportIconColor('unknown-icon', 'cycling'), CATEGORIES.cycling.color)
+  assert.equal(sportIconColor('unknown-icon', 'nope'), CATEGORIES.other.color)
 })
