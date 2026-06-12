@@ -324,8 +324,9 @@ export function mergeEntriesForSave(localEntries, remoteEntries, deletedIds = []
 }
 
 // ---------------------------------------------------------------------------
-// In-progress session draft. The embedded agent writes current_session.json;
-// the UI commits it to entries.json only when the user presses Finish session.
+// In-progress session draft. The embedded agent and quick-add both write
+// current_session.json; the UI commits it to entries.json only when the
+// user presses Finish session.
 // ---------------------------------------------------------------------------
 
 export function normalizeCurrentSession(session, now = Date.now()) {
@@ -412,6 +413,28 @@ export function entriesFromCurrentSession(session) {
     sessionId: normalized.id,
     confirmed: true,
   }))
+}
+
+// Quick-add and the embedded chat agent are co-writers of the SAME
+// current_session.json draft: logging an entry implicitly starts a session
+// when none is active, and extends the active one otherwise. Routing the
+// result through normalizeCurrentSession keeps the two writers byte-
+// compatible — id "session-<startedAt>", status "active", entries stamped
+// with the shared sessionId/localDate and startedAt + index*1000 ordering,
+// exactly the shape the agent prompt documents. Never mutates the input.
+export function appendEntryToCurrentSession(session, entry, now = Date.now()) {
+  const active = normalizeCurrentSession(session, now)
+  if (active) {
+    return normalizeCurrentSession({ ...active, entries: [...active.entries, entry] }, now)
+  }
+  const tsRaw = Number(entry?.ts)
+  const startedAt = Number.isFinite(tsRaw) ? tsRaw : now
+  return normalizeCurrentSession({
+    id: `session-${startedAt}`,
+    startedAt,
+    status: 'active',
+    entries: [entry],
+  }, now)
 }
 
 // ---------------------------------------------------------------------------

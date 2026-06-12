@@ -332,8 +332,9 @@ function mergeEntriesForSave(localEntries, remoteEntries, deletedIds = []) {
 }
 
 // ---------------------------------------------------------------------------
-// In-progress session draft. The embedded agent writes current_session.json;
-// the UI commits it to entries.json only when the user presses Finish session.
+// In-progress session draft. The embedded agent and quick-add both write
+// current_session.json; the UI commits it to entries.json only when the
+// user presses Finish session.
 // ---------------------------------------------------------------------------
 
 function normalizeCurrentSession(session, now = Date.now()) {
@@ -420,6 +421,28 @@ function entriesFromCurrentSession(session) {
     sessionId: normalized.id,
     confirmed: true,
   }))
+}
+
+// Quick-add and the embedded chat agent are co-writers of the SAME
+// current_session.json draft: logging an entry implicitly starts a session
+// when none is active, and extends the active one otherwise. Routing the
+// result through normalizeCurrentSession keeps the two writers byte-
+// compatible — id "session-<startedAt>", status "active", entries stamped
+// with the shared sessionId/localDate and startedAt + index*1000 ordering,
+// exactly the shape the agent prompt documents. Never mutates the input.
+function appendEntryToCurrentSession(session, entry, now = Date.now()) {
+  const active = normalizeCurrentSession(session, now)
+  if (active) {
+    return normalizeCurrentSession({ ...active, entries: [...active.entries, entry] }, now)
+  }
+  const tsRaw = Number(entry?.ts)
+  const startedAt = Number.isFinite(tsRaw) ? tsRaw : now
+  return normalizeCurrentSession({
+    id: `session-${startedAt}`,
+    startedAt,
+    status: 'active',
+    entries: [entry],
+  }, now)
 }
 
 // ---------------------------------------------------------------------------
@@ -1041,6 +1064,7 @@ export {
   sessionEntryMissing,
   currentSessionReady,
   entriesFromCurrentSession,
+  appendEntryToCurrentSession,
   draftsFromParsedPayload,
   groupSessions,
   summarizeMetrics,
@@ -3307,21 +3331,32 @@ export default function App({ appId, token }) {
     navHandleRef.current = null
   }, [])
 
-  const commitQuickAdd = useCallback((draft, ts) => {
-    const sessionId = assignSession(entries || [], ts)
+  // Quick-add writes the current-session draft, never entries.json directly.
+  // The first saved entry implicitly starts a session (the CurrentSessionPanel
+  // appearing with the entry IS the save feedback); entries reach committed
+  // history exactly once, when Finish session commits the draft.
+  const commitQuickAdd = useCallback(async (draft, ts) => {
     const entry = normalizeEntry(draft, {
       ts,
-      sessionId,
       raw: '',
       source: 'manual',
       confirmed: true,
     })
-    persist([...(entries || []), entry])
+    // Read-modify-write against the store, not just React state: the embedded
+    // agent co-writes current_session.json and this client may not have
+    // re-loaded its latest draft yet. Fall back to local state so a transient
+    // empty read can't fork a second session while one is on screen.
+    const loaded = await store.get('current_session.json')
+    const next = appendEntryToCurrentSession(loaded || currentSession, entry, ts)
+    setCurrentSession(next)
     closeNestedNav()
     setQuickAddDraft(null)
     setLastEntryForQuickAdd(null)
+    setTab('session')
+    const result = await store.set('current_session.json', next)
+    bumpSync(result)
     window.mobius?.signal?.('item_created')
-  }, [entries, persist, closeNestedNav])
+  }, [bumpSync, closeNestedNav, currentSession, store])
 
   const commitEditedEntry = useCallback((edited, ts) => {
     if (!editingEntry) return
@@ -3585,15 +3620,16 @@ export default function App({ appId, token }) {
                         Session saved — find it in History.
                       </div>
                     )}
-                    {currentSession ? (
+                    {currentSession && (
                       <CurrentSessionPanel
                         session={currentSession}
                         onFinish={finishCurrentSession}
                         finishing={finishing}
                       />
-                    ) : (
-                      <QuickAddStrip entries={entries} onQuickAdd={openQuickAdd} />
                     )}
+                    {/* Quick-add stays visible during an active session — it
+                        appends to the draft, so the next tap logs entry #2. */}
+                    <QuickAddStrip entries={entries} onQuickAdd={openQuickAdd} />
                   </>
                 )}
                 {tab === 'history' && (

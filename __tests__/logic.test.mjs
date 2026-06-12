@@ -15,6 +15,7 @@ import {
   SESSION_GAP_MS, toKg, summarizeMetrics, extractFirstJsonObject, localDate,
   mergeEntriesForSave, draftsFromParsedPayload, normalizeCurrentSession,
   sessionEntryMissing, currentSessionReady, entriesFromCurrentSession,
+  appendEntryToCurrentSession,
   exerciseKey, exerciseList, exerciseDetail, paceSecPerKm, fmtPace,
   lastEntryForExercise, recentExercises,
 } from '../logic.js'
@@ -618,4 +619,77 @@ test('recentExercises deduplicates and respects n cap', () => {
   assert.equal(recents.length, 2)
   assert.equal(recents[0].activity, 'Bench')
   assert.equal(recents[1].activity, 'Deadlift')
+})
+
+// --- quick-add → current_session.json (the implicit session start) ---
+// commitQuickAdd no longer writes entries.json: it appends the normalized
+// entry to the same current_session.json draft the embedded agent maintains,
+// and only Finish session moves the draft into committed history.
+
+function quickAddEntry(ts, activity = 'Deadlift', weight = 100, reps = 5) {
+  // Exactly what commitQuickAdd builds: ConfirmCard's loose parsed draft
+  // through normalizeEntry with the quick-add opts.
+  return normalizeEntry(
+    { category: 'strength', activity, metrics: { sets: [{ weight, reps, unit: 'kg' }] } },
+    { ts, raw: '', source: 'manual', confirmed: true },
+  )
+}
+
+test('quick-add with no active session starts one in the agent-prompt shape', () => {
+  const ts = base + 3_600_000
+  const session = appendEntryToCurrentSession(null, quickAddEntry(ts))
+  assert.equal(session.id, `session-${ts}`)
+  assert.equal(session.startedAt, ts)
+  assert.equal(session.status, 'active')
+  assert.equal(session.localDate, localDate(new Date(ts)))
+  assert.equal(session.pendingQuestion, null)
+  assert.equal(session.entries.length, 1)
+  assert.equal(session.entries[0].sessionId, session.id)
+  assert.equal(session.entries[0].activity, 'Deadlift')
+  assert.equal(session.entries[0].source, 'manual')
+  // A complete quick-add entry leaves the draft finishable immediately.
+  assert.equal(currentSessionReady(session), true)
+})
+
+test('quick-add extends an active agent-written session without disturbing it', () => {
+  const startedAt = base
+  const agentSession = {
+    id: `session-${startedAt}`,
+    startedAt,
+    localDate: localDate(new Date(startedAt)),
+    status: 'active',
+    entries: [
+      {
+        id: 'draft-1', ts: startedAt, localDate: localDate(new Date(startedAt)),
+        sessionId: `session-${startedAt}`, category: 'strength', activity: 'Squat',
+        icon: 'barbell', metrics: { sets: [{ weight_kg: 90, reps: 5, unit: 'kg' }] },
+        raw: '5 squats at 90', source: 'ai', confirmed: true,
+      },
+    ],
+    pendingQuestion: null,
+  }
+  const next = appendEntryToCurrentSession(agentSession, quickAddEntry(startedAt + 600_000, 'Bench Press', 80, 8))
+  assert.equal(next.id, agentSession.id)
+  assert.equal(next.startedAt, startedAt)
+  assert.equal(next.entries.length, 2)
+  assert.deepEqual(next.entries.map((e) => e.activity), ['Squat', 'Bench Press'])
+  // Both writers' entries share the session id and the +1000ms ordering rule.
+  assert.deepEqual(next.entries.map((e) => e.sessionId), [next.id, next.id])
+  assert.deepEqual(next.entries.map((e) => e.ts), [startedAt, startedAt + 1000])
+  // The input draft is not mutated.
+  assert.equal(agentSession.entries.length, 1)
+})
+
+test('finish commits quick-add entries to history exactly once (no double-write)', () => {
+  const history = [strengthEntry('old-1', base - 2 * DAY, 's-old', 'Deadlift', [[90, 5]])]
+  let session = appendEntryToCurrentSession(null, quickAddEntry(base, 'Overhead Press', 50, 5))
+  session = appendEntryToCurrentSession(session, quickAddEntry(base + 60_000, 'Pull-up', 0.01, 8))
+  // Quick-add must leave committed history untouched until Finish.
+  const committed = entriesFromCurrentSession(session)
+  assert.equal(committed.length, 2)
+  const merged = mergeEntriesForSave([...history, ...committed], history)
+  assert.equal(merged.length, 3)
+  assert.equal(merged.filter((e) => e.activity === 'Overhead Press').length, 1)
+  assert.equal(merged.filter((e) => e.activity === 'Pull-up').length, 1)
+  assert.equal(merged.filter((e) => e.id === 'old-1').length, 1)
 })

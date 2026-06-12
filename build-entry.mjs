@@ -22,6 +22,7 @@ const TEST_EXPORTS = [
   'sessionEntryMissing',
   'currentSessionReady',
   'entriesFromCurrentSession',
+  'appendEntryToCurrentSession',
   'draftsFromParsedPayload',
   'groupSessions',
   'summarizeMetrics',
