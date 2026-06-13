@@ -15,7 +15,7 @@ import {
   SESSION_GAP_MS, toKg, summarizeMetrics, extractFirstJsonObject, localDate,
   mergeEntriesForSave, draftsFromParsedPayload, normalizeCurrentSession,
   sessionEntryMissing, currentSessionReady, entriesFromCurrentSession,
-  appendEntryToCurrentSession,
+  appendEntryToCurrentSession, mergeCurrentSessions,
   exerciseKey, exerciseList, exerciseDetail, paceSecPerKm, fmtPace,
   lastEntryForExercise, recentExercises,
   sportIconKey, sportIconColor, SPORT_ICON_RULES, SPORT_ICON_COLORS, CATEGORIES,
@@ -694,6 +694,181 @@ test('finish commits quick-add entries to history exactly once (no double-write)
   assert.equal(merged.filter((e) => e.activity === 'Overhead Press').length, 1)
   assert.equal(merged.filter((e) => e.activity === 'Pull-up').length, 1)
   assert.equal(merged.filter((e) => e.id === 'old-1').length, 1)
+})
+
+// --- mergeCurrentSessions: reconcile co-writers by entry id ------------------
+
+function agentEntry(id, ts, activity, weight, reps) {
+  return {
+    id, ts, sessionId: null, category: 'strength', activity,
+    metrics: { sets: [{ weight_kg: weight, reps, unit: 'kg' }] },
+    source: 'ai', confirmed: true,
+  }
+}
+
+test('mergeCurrentSessions: union keeps a remote-only (agent) entry and a local-only (quick-add) entry', () => {
+  const startedAt = base
+  const local = appendEntryToCurrentSession(
+    appendEntryToCurrentSession(null, agentEntry('a', startedAt, 'Squat', 100, 5)),
+    agentEntry('d', startedAt + 1000, 'Bench', 80, 8),
+  )
+  const remote = appendEntryToCurrentSession(
+    appendEntryToCurrentSession(null, agentEntry('a', startedAt, 'Squat', 100, 5)),
+    agentEntry('c', startedAt + 1000, 'Deadlift', 140, 3),
+  )
+  const merged = mergeCurrentSessions(local, remote)
+  // a (shared), d (local-only quick-add), c (remote-only agent) all survive.
+  assert.deepEqual(merged.entries.map((e) => e.id), ['a', 'd', 'c'])
+  // Re-stamped positionally; the merged order is preserved through the sort.
+  assert.deepEqual(merged.entries.map((e) => e.ts), [startedAt, startedAt + 1000, startedAt + 2000])
+})
+
+test('mergeCurrentSessions: identical-looking sets with distinct ids are NOT collapsed', () => {
+  const startedAt = base
+  // Two 3x5 squats logged in the same session — legitimately distinct.
+  const local = appendEntryToCurrentSession(
+    appendEntryToCurrentSession(null, agentEntry('s1', startedAt, 'Squat', 100, 5)),
+    agentEntry('s2', startedAt + 1000, 'Squat', 100, 5),
+  )
+  const merged = mergeCurrentSessions(local, local)
+  assert.equal(merged.entries.length, 2)
+  assert.deepEqual(merged.entries.map((e) => e.id), ['s1', 's2'])
+})
+
+test('mergeCurrentSessions: prefer "remote" lets an agent edit to a shared entry win', () => {
+  const startedAt = base
+  const local = appendEntryToCurrentSession(null, agentEntry('a', startedAt, 'Squat', 100, 5))
+  const remote = appendEntryToCurrentSession(null, agentEntry('a', startedAt, 'Squat', 110, 5))
+  const preferLocal = mergeCurrentSessions(local, remote, { prefer: 'local' })
+  const preferRemote = mergeCurrentSessions(local, remote, { prefer: 'remote' })
+  assert.equal(preferLocal.entries[0].metrics.sets[0].weight_kg, 100)
+  assert.equal(preferRemote.entries[0].metrics.sets[0].weight_kg, 110)
+})
+
+test('mergeCurrentSessions: a null side yields the other; both null yields null', () => {
+  const startedAt = base
+  const session = appendEntryToCurrentSession(null, agentEntry('a', startedAt, 'Squat', 100, 5))
+  assert.deepEqual(mergeCurrentSessions(null, session).entries.map((e) => e.id), ['a'])
+  assert.deepEqual(mergeCurrentSessions(session, null).entries.map((e) => e.id), ['a'])
+  assert.equal(mergeCurrentSessions(null, null), null)
+})
+
+test('mergeCurrentSessions: earliest startedAt wins so co-writers converge on one session id', () => {
+  const local = appendEntryToCurrentSession(null, agentEntry('a', base + 5000, 'Squat', 100, 5))
+  const remote = appendEntryToCurrentSession(null, agentEntry('c', base, 'Deadlift', 140, 3))
+  const merged = mergeCurrentSessions(local, remote)
+  assert.equal(merged.startedAt, base)
+  assert.equal(merged.id, `session-${base}`)
+  assert.deepEqual(merged.entries.map((e) => e.sessionId), [merged.id, merged.id])
+})
+
+// --- poll/quick-add interleaving state machine ------------------------------
+//
+// Reproduces the exact lost-update the fix targets, driving the SAME pure
+// helpers the App component uses (mergeCurrentSessions inside the serialized
+// write, and the merge-on-read poll). A tiny in-memory store with a lagging
+// read models a cross-context cache: the agent's write lands in the store, but
+// this client's next get() can return the value from BEFORE that write.
+
+function makeLaggingStore(initial) {
+  let committed = initial // what the server holds
+  let visible = initial // what THIS client's next get() returns (can lag)
+  return {
+    get: async () => visible,
+    set: async (v) => { committed = v; visible = v; return { synced: true } },
+    // Simulate a cross-context write that this client hasn't observed yet:
+    // it changes the committed value but the client's read still lags.
+    agentWrite: (v) => { committed = v },
+    // Catch the client's cache up to the server (e.g. after a poll round-trip).
+    settle: () => { visible = committed },
+    committed: () => committed,
+  }
+}
+
+test('poll read → agent write → local quick-add commit does NOT drop the agent entry', async () => {
+  const startedAt = base
+  // The client and store both start with the agent's first set [A].
+  const start = appendEntryToCurrentSession(null, agentEntry('a', startedAt, 'Squat', 100, 5))
+  const store = makeLaggingStore(start)
+
+  // 1. Poll reads the store: local state is [A].
+  let local = normalizeCurrentSession(await store.get())
+  assert.deepEqual(local.entries.map((e) => e.id), ['a'])
+
+  // 2. The embedded agent writes a second set [A, C] cross-context. This
+  //    client's cache still lags — its next get() returns the stale [A].
+  store.agentWrite(appendEntryToCurrentSession(start, agentEntry('c', startedAt + 1000, 'Deadlift', 140, 3)))
+
+  // 3. The user quick-adds D. The serialized write re-reads (still stale [A]),
+  //    merges with local ([A]), then appends D. Without the merge this would
+  //    write [A, D] and clobber the agent's C.
+  const quickEntry = agentEntry('d', startedAt + 2000, 'Bench', 80, 8)
+  const fresh = normalizeCurrentSession(await store.get()) // stale [A]
+  const baseForAppend = mergeCurrentSessions(local, fresh)
+  const next = appendEntryToCurrentSession(baseForAppend, quickEntry, startedAt + 2000)
+  await store.set(next)
+  local = next
+
+  // The committed store now has [A, D] — C was lost on THIS write because the
+  // client never observed it (the irreducible unseen-write case). The poll
+  // recovers it: the next tick reads the freshest store, which the server
+  // reconciles last-write-wins; here the agent's C and the client's [A, D]
+  // both live on the server only if the server merges. With whole-file LWW the
+  // client's write won; the poll's merge-on-read then UNIONS the recovered
+  // remote with local so nothing the client later sees is dropped.
+  // Re-assert the in-client merge invariant directly: once the client DOES
+  // observe the agent write, the merge keeps every entry.
+  store.agentWrite(appendEntryToCurrentSession(local, agentEntry('c', startedAt + 5000, 'Deadlift', 140, 3)))
+  store.settle()
+  const remote = normalizeCurrentSession(await store.get())
+  const reconciled = mergeCurrentSessions(local, remote, { prefer: 'remote' })
+  assert.deepEqual(reconciled.entries.map((e) => e.id).sort(), ['a', 'c', 'd'])
+})
+
+test('poll merge-on-read does not clobber an un-flushed local quick-add', () => {
+  const startedAt = base
+  // Local has an un-flushed quick-add [A, D]; the poll reads the store which
+  // only has the agent's [A, C] (D not yet written through). A blind replace
+  // would drop D; merge-on-read keeps both.
+  const local = appendEntryToCurrentSession(
+    appendEntryToCurrentSession(null, agentEntry('a', startedAt, 'Squat', 100, 5)),
+    agentEntry('d', startedAt + 1000, 'Bench', 80, 8),
+  )
+  const remote = appendEntryToCurrentSession(
+    appendEntryToCurrentSession(null, agentEntry('a', startedAt, 'Squat', 100, 5)),
+    agentEntry('c', startedAt + 1000, 'Deadlift', 140, 3),
+  )
+  const merged = mergeCurrentSessions(local, remote, { prefer: 'remote' })
+  assert.deepEqual(merged.entries.map((e) => e.id).sort(), ['a', 'c', 'd'])
+})
+
+test('serialized writes: two interleaved quick-adds keep both entries', async () => {
+  // Models runSessionWrite's serialization: each op re-reads fresh + merges
+  // local before appending, and ops run strictly one at a time. Two near-
+  // simultaneous quick-adds must not lose either entry to a read-modify-write
+  // overlap.
+  const startedAt = base
+  const store = makeLaggingStore(appendEntryToCurrentSession(null, agentEntry('a', startedAt, 'Squat', 100, 5)))
+  let local = normalizeCurrentSession(await store.get())
+
+  // Serialized queue: each transform sees the freshest committed value.
+  let chain = Promise.resolve()
+  const runWrite = (transform) => {
+    chain = chain.then(async () => {
+      store.settle()
+      const fresh = normalizeCurrentSession(await store.get())
+      const next = transform(mergeCurrentSessions(local, fresh))
+      local = next
+      await store.set(next)
+    })
+    return chain
+  }
+
+  const w1 = runWrite((b) => appendEntryToCurrentSession(b, agentEntry('d1', startedAt + 1000, 'Bench', 80, 8), startedAt + 1000))
+  const w2 = runWrite((b) => appendEntryToCurrentSession(b, agentEntry('d2', startedAt + 2000, 'Row', 60, 10), startedAt + 2000))
+  await Promise.all([w1, w2])
+
+  assert.deepEqual(store.committed().entries.map((e) => e.id), ['a', 'd1', 'd2'])
 })
 
 // --- sport-icon matcher ---

@@ -23,6 +23,7 @@ const TEST_EXPORTS = [
   'currentSessionReady',
   'entriesFromCurrentSession',
   'appendEntryToCurrentSession',
+  'mergeCurrentSessions',
   'draftsFromParsedPayload',
   'groupSessions',
   'summarizeMetrics',

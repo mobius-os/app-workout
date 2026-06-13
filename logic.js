@@ -538,6 +538,88 @@ export function appendEntryToCurrentSession(session, entry, now = Date.now()) {
   }, now)
 }
 
+// Reconcile two views of the same current-session draft by entry id (union),
+// so a poll read never clobbers a co-writer's entry. The draft has two
+// concurrent writers — the embedded agent (cross-context) and this client's
+// quick-add — and the whole file is written last-write-wins with no CAS. The
+// 5s visible-tab poll reads the store and the quick-add does a read-modify-
+// write; either can race the other:
+//
+//   poll reads remote [A,B]  →  agent writes C → store is [A,B,C]
+//   quick-add appends D to its stale local [A,B] → set [A,B,D]   // drops C
+//   (or, symmetrically, a poll's blind replace overwrites an un-flushed D)
+//
+// Blind `setCurrentSession(remote)` and "transform the fresh read" both lose
+// the entry that exists on only one side. Merging on the STABLE per-entry id
+// (the agent prompt mandates it; quick-add's normalizeEntry mints a uid; both
+// survive normalizeCurrentSession) keeps every entry from both sides.
+//
+// Identity is the id, not a content signature: two legitimately-identical sets
+// (3×5 squat logged twice) are distinct entries and must not collapse. On an
+// id collision the `prefer` side wins ('local' so the user's just-edited copy
+// isn't reverted by a slightly older remote read; 'remote' when settling a
+// post-write read). Order: local entries first (preserving the on-screen
+// order), then remote-only entries appended; normalizeCurrentSession re-stamps
+// the positional ts/sessionId so the result stays byte-compatible. Entries
+// without an id (legacy/malformed) are kept positionally and never merged
+// away. Never mutates either input. A null/empty side yields the other.
+export function mergeCurrentSessions(localSession, remoteSession, { prefer = 'local', now = Date.now() } = {}) {
+  const local = normalizeCurrentSession(localSession, now)
+  const remote = normalizeCurrentSession(remoteSession, now)
+  if (!local) return remote
+  if (!remote) return local
+
+  // Earliest startedAt wins so both writers converge on one session identity
+  // even if their clocks differed by a tick. Re-derive the id from it so the
+  // result keeps the `id = session-<startedAt>` contract both writers and
+  // appendEntryToCurrentSession follow (lowering startedAt without this would
+  // leave the stale higher-startedAt id behind).
+  const startedAt = Math.min(local.startedAt, remote.startedAt)
+  const id = `session-${startedAt}`
+
+  const localById = new Map()
+  for (const entry of local.entries) {
+    if (entry.id) localById.set(entry.id, entry)
+  }
+  const remoteById = new Map()
+  for (const entry of remote.entries) {
+    if (entry.id) remoteById.set(entry.id, entry)
+  }
+
+  const merged = []
+  const seen = new Set()
+  // Local order first. For an id present on both sides, `prefer` decides which
+  // copy's fields survive (the ids are identical, so order is unaffected).
+  for (const entry of local.entries) {
+    if (!entry.id) { merged.push(entry); continue }
+    if (seen.has(entry.id)) continue
+    seen.add(entry.id)
+    const remoteMatch = remoteById.get(entry.id)
+    merged.push(prefer === 'remote' && remoteMatch ? remoteMatch : entry)
+  }
+  // Then remote-only entries (e.g. the agent's just-written set) appended.
+  for (const entry of remote.entries) {
+    if (!entry.id) { merged.push(entry); continue }
+    if (seen.has(entry.id)) continue
+    seen.add(entry.id)
+    merged.push(entry)
+  }
+
+  // Re-stamp the positional ts by merged-array index so the merged order (local
+  // first, remote-only appended) survives normalizeCurrentSession's ts-sort.
+  // The inputs are already-normalized sessions whose entries carry positional
+  // ts relative to their OWN side, so without this the sort could interleave
+  // the two sides by stale per-side ts.
+  const ordered = merged.map((entry, index) => ({ ...entry, ts: startedAt + index * 1000 }))
+
+  return normalizeCurrentSession({
+    ...local,
+    id,
+    startedAt,
+    entries: ordered,
+  }, now)
+}
+
 // ---------------------------------------------------------------------------
 // Session grouping — entries within SESSION_GAP_MS of each other (in time
 // order) share a sessionId. groupSessions takes the full append-only entries

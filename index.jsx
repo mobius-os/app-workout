@@ -546,6 +546,88 @@ function appendEntryToCurrentSession(session, entry, now = Date.now()) {
   }, now)
 }
 
+// Reconcile two views of the same current-session draft by entry id (union),
+// so a poll read never clobbers a co-writer's entry. The draft has two
+// concurrent writers — the embedded agent (cross-context) and this client's
+// quick-add — and the whole file is written last-write-wins with no CAS. The
+// 5s visible-tab poll reads the store and the quick-add does a read-modify-
+// write; either can race the other:
+//
+//   poll reads remote [A,B]  →  agent writes C → store is [A,B,C]
+//   quick-add appends D to its stale local [A,B] → set [A,B,D]   // drops C
+//   (or, symmetrically, a poll's blind replace overwrites an un-flushed D)
+//
+// Blind `setCurrentSession(remote)` and "transform the fresh read" both lose
+// the entry that exists on only one side. Merging on the STABLE per-entry id
+// (the agent prompt mandates it; quick-add's normalizeEntry mints a uid; both
+// survive normalizeCurrentSession) keeps every entry from both sides.
+//
+// Identity is the id, not a content signature: two legitimately-identical sets
+// (3×5 squat logged twice) are distinct entries and must not collapse. On an
+// id collision the `prefer` side wins ('local' so the user's just-edited copy
+// isn't reverted by a slightly older remote read; 'remote' when settling a
+// post-write read). Order: local entries first (preserving the on-screen
+// order), then remote-only entries appended; normalizeCurrentSession re-stamps
+// the positional ts/sessionId so the result stays byte-compatible. Entries
+// without an id (legacy/malformed) are kept positionally and never merged
+// away. Never mutates either input. A null/empty side yields the other.
+function mergeCurrentSessions(localSession, remoteSession, { prefer = 'local', now = Date.now() } = {}) {
+  const local = normalizeCurrentSession(localSession, now)
+  const remote = normalizeCurrentSession(remoteSession, now)
+  if (!local) return remote
+  if (!remote) return local
+
+  // Earliest startedAt wins so both writers converge on one session identity
+  // even if their clocks differed by a tick. Re-derive the id from it so the
+  // result keeps the `id = session-<startedAt>` contract both writers and
+  // appendEntryToCurrentSession follow (lowering startedAt without this would
+  // leave the stale higher-startedAt id behind).
+  const startedAt = Math.min(local.startedAt, remote.startedAt)
+  const id = `session-${startedAt}`
+
+  const localById = new Map()
+  for (const entry of local.entries) {
+    if (entry.id) localById.set(entry.id, entry)
+  }
+  const remoteById = new Map()
+  for (const entry of remote.entries) {
+    if (entry.id) remoteById.set(entry.id, entry)
+  }
+
+  const merged = []
+  const seen = new Set()
+  // Local order first. For an id present on both sides, `prefer` decides which
+  // copy's fields survive (the ids are identical, so order is unaffected).
+  for (const entry of local.entries) {
+    if (!entry.id) { merged.push(entry); continue }
+    if (seen.has(entry.id)) continue
+    seen.add(entry.id)
+    const remoteMatch = remoteById.get(entry.id)
+    merged.push(prefer === 'remote' && remoteMatch ? remoteMatch : entry)
+  }
+  // Then remote-only entries (e.g. the agent's just-written set) appended.
+  for (const entry of remote.entries) {
+    if (!entry.id) { merged.push(entry); continue }
+    if (seen.has(entry.id)) continue
+    seen.add(entry.id)
+    merged.push(entry)
+  }
+
+  // Re-stamp the positional ts by merged-array index so the merged order (local
+  // first, remote-only appended) survives normalizeCurrentSession's ts-sort.
+  // The inputs are already-normalized sessions whose entries carry positional
+  // ts relative to their OWN side, so without this the sort could interleave
+  // the two sides by stale per-side ts.
+  const ordered = merged.map((entry, index) => ({ ...entry, ts: startedAt + index * 1000 }))
+
+  return normalizeCurrentSession({
+    ...local,
+    id,
+    startedAt,
+    entries: ordered,
+  }, now)
+}
+
 // ---------------------------------------------------------------------------
 // Session grouping — entries within SESSION_GAP_MS of each other (in time
 // order) share a sessionId. groupSessions takes the full append-only entries
@@ -1210,6 +1292,7 @@ export {
   currentSessionReady,
   entriesFromCurrentSession,
   appendEntryToCurrentSession,
+  mergeCurrentSessions,
   draftsFromParsedPayload,
   groupSessions,
   summarizeMetrics,
@@ -3419,6 +3502,15 @@ export default function App({ appId, token }) {
   // session commits twice. The ref flips synchronously, blocking the second
   // tap before React re-renders the disabled button.
   const finishInFlightRef = useRef(false)
+  // Serializes every current_session.json write (quick-add + Finish-clear) so
+  // two local writes can't interleave a read-modify-write and lose an entry,
+  // and gates the poll/refresh reader out while a write is mid-flight. Each
+  // queued op re-reads the freshest store value and merges before writing, so
+  // it can't clobber a co-writer's (agent's) entry either. `chain` is the
+  // promise tail every op awaits; `inFlight` mirrors it for the synchronous
+  // poll-gate check.
+  const sessionWriteRef = useRef({ chain: Promise.resolve() })
+  const sessionWriteInFlightRef = useRef(false)
   const [finishing, setFinishing] = useState(false)
   // Brief "Session saved" confirmation after Finish. Auto-clears in 3s.
   const [sessionSaved, setSessionSaved] = useState(false)
@@ -3483,19 +3575,33 @@ export default function App({ appId, token }) {
   }, [bumpSync, store])
 
   const loadCurrentSession = useCallback(async () => {
+    // A local write (quick-add / Finish-clear) in flight owns the canonical
+    // current_session.json. The poll's store.get can lag that write (or read a
+    // stale cross-context cache), so a refresh landing mid-write would set a
+    // value the in-flight write is about to supersede — and a blind replace
+    // could even revert the user's just-tapped entry. Let the in-flight write
+    // settle the state; it re-reads + merges fresh before it returns.
+    if (sessionWriteInFlightRef.current) return undefined
     const loaded = await store.get('current_session.json')
-    const normalized = normalizeCurrentSession(loaded)
-    // Guard the state update against no-op churn: the visible-tab poll below
-    // calls this every few seconds, and replacing currentSession with a fresh
-    // deep-equal object every tick would re-render the whole Session view for
-    // nothing. Keep the previous reference when the value hasn't changed.
-    setCurrentSession((prev) =>
-      JSON.stringify(prev) === JSON.stringify(normalized) ? prev : normalized
-    )
-    if (loaded && JSON.stringify(loaded) !== JSON.stringify(normalized)) {
-      store.set('current_session.json', normalized).then((r) => bumpSync(r))
+    const remote = normalizeCurrentSession(loaded)
+    // Reconcile rather than blind-replace: the embedded agent and quick-add are
+    // co-writers of this draft, and a poll that reads the agent's view ([A,B,C])
+    // must not drop a local un-flushed quick-add ([A,B,D]) — nor vice-versa.
+    // Merge on the stable per-entry id so both sides' entries survive (see
+    // mergeCurrentSessions). A null remote (session cleared/finished elsewhere)
+    // is an authoritative clear and replaces local. `prefer: 'remote'` lets an
+    // agent edit to a shared entry win on the refresh path.
+    setCurrentSession((prev) => {
+      const next = remote == null ? null : mergeCurrentSessions(prev, remote, { prefer: 'remote' })
+      // No-op churn guard: the visible-tab poll calls this every few seconds;
+      // replacing currentSession with a deep-equal object every tick would
+      // re-render the whole Session view for nothing.
+      return JSON.stringify(prev) === JSON.stringify(next) ? prev : next
+    })
+    if (loaded && JSON.stringify(loaded) !== JSON.stringify(remote)) {
+      store.set('current_session.json', remote).then((r) => bumpSync(r))
     }
-    return normalized
+    return remote
   }, [bumpSync, store])
 
   // Initial load. entries.json is the append-only log. If it's missing but a
@@ -3530,13 +3636,45 @@ export default function App({ appId, token }) {
   // notifies this card — it stayed blank until a manual refresh. Poll the
   // draft while the tab is visible, and refresh immediately on focus / becoming
   // visible, so an agent-logged set surfaces within a few seconds with no
-  // reload. The poll is skipped mid-Finish so it can't resurrect a just-cleared
-  // session, and the load above no-ops its setState when nothing changed.
+  // reload. loadCurrentSession itself merges the read with local state and
+  // bails while a local write is in flight, so the poll can neither resurrect a
+  // just-cleared session nor clobber an un-flushed quick-add, and it no-ops its
+  // setState when nothing changed.
   useEffect(() => {
     if (typeof document === 'undefined' || typeof window === 'undefined') return undefined
-    const tick = () => { if (!finishInFlightRef.current) loadCurrentSession() }
-    return createVisiblePoller(tick, { doc: document, win: window })
+    return createVisiblePoller(loadCurrentSession, { doc: document, win: window })
   }, [loadCurrentSession])
+
+  // Serialize every current_session.json write. `transform(fresh)` receives the
+  // freshest store value (re-read here, inside the queue, so co-writer entries
+  // the agent added after the caller's last render are visible) and returns the
+  // next session (or null to clear). Writes run strictly one-at-a-time on a
+  // single promise chain, so two quick-adds — or a quick-add racing Finish —
+  // can't interleave a read-modify-write and drop an entry. The in-flight flag
+  // gates the poll reader out for the whole op so a refresh can't land a value
+  // the write is about to supersede. Returns the written session.
+  const runSessionWrite = useCallback((transform) => {
+    const run = sessionWriteRef.current.chain.then(async () => {
+      sessionWriteInFlightRef.current = true
+      try {
+        const loaded = await store.get('current_session.json')
+        const fresh = normalizeCurrentSession(loaded)
+        const next = transform(fresh)
+        setCurrentSession(next)
+        const result = await store.set('current_session.json', next)
+        bumpSync(result)
+        return next
+      } finally {
+        sessionWriteInFlightRef.current = false
+      }
+    })
+    // Keep the chain alive even if this op throws, so a single failure doesn't
+    // wedge every later write. Callers still see the rejection via the returned
+    // promise.
+    sessionWriteRef.current.chain = run.catch(() => {})
+    return run
+  }, [bumpSync, store])
+
   const flushSaves = useCallback(async () => {
     const q = saveQueueRef.current
     if (q.inFlight) return
@@ -3595,21 +3733,27 @@ export default function App({ appId, token }) {
       source: 'manual',
       confirmed: true,
     })
-    // Read-modify-write against the store, not just React state: the embedded
-    // agent co-writes current_session.json and this client may not have
-    // re-loaded its latest draft yet. Fall back to local state so a transient
-    // empty read can't fork a second session while one is on screen.
-    const loaded = await store.get('current_session.json')
-    const next = appendEntryToCurrentSession(loaded || currentSession, entry, ts)
-    setCurrentSession(next)
+    // Dismiss the quick-add UI immediately; the write runs through the
+    // serialized current_session queue below.
     closeNestedNav()
     setQuickAddDraft(null)
     setLastEntryForQuickAdd(null)
     setTab('session')
-    const result = await store.set('current_session.json', next)
-    bumpSync(result)
+    // Serialized read-modify-write: the queue re-reads the freshest store value
+    // (the embedded agent co-writes current_session.json, and this client may
+    // not have re-loaded its latest draft). Merge that fresh read with the
+    // on-screen local session FIRST so an agent entry the read missed AND an
+    // earlier un-flushed quick-add both survive, THEN append this entry. The
+    // queue keeps two quick-adds (or a quick-add racing Finish) from
+    // interleaving and dropping an entry.
+    await runSessionWrite((fresh) => {
+      const base = fresh || currentSession
+        ? mergeCurrentSessions(currentSession, fresh)
+        : null
+      return appendEntryToCurrentSession(base, entry, ts)
+    })
     window.mobius?.signal?.('item_created')
-  }, [bumpSync, closeNestedNav, currentSession, store])
+  }, [closeNestedNav, currentSession, runSessionWrite])
 
   const commitEditedEntry = useCallback((edited, ts) => {
     if (!editingEntry) return
@@ -3637,16 +3781,28 @@ export default function App({ appId, token }) {
 
   const finishCurrentSession = useCallback(async () => {
     if (finishInFlightRef.current) return
-    const committed = entriesFromCurrentSession(currentSession)
-    if (committed.length === 0) return
+    if (!currentSessionReady(currentSession)) return
     finishInFlightRef.current = true
     setFinishing(true)
     try {
+      // Re-read + merge the freshest draft inside the serialized write queue,
+      // THEN commit. The agent may have appended a set to current_session.json
+      // moments before Finish that this client's poll hasn't merged yet;
+      // committing from the stale in-memory session would drop it, and the
+      // clear-to-null below would then erase it for good. Committing from the
+      // merged-fresh draft captures every co-writer's entry exactly once.
+      let committed = []
+      await runSessionWrite((fresh) => {
+        const merged = mergeCurrentSessions(currentSession, fresh)
+        committed = entriesFromCurrentSession(merged)
+        // Clear the draft only once its entries are committed below. Returning
+        // null here is the atomic clear; the commit to entries.json happens
+        // right after this write settles.
+        return null
+      })
+      if (committed.length === 0) return
       const nextEntries = mergeEntriesForSave([...(entries || []), ...committed], entries)
       persist(nextEntries)
-      setCurrentSession(null)
-      const result = await store.set('current_session.json', null)
-      bumpSync(result)
       // Reload entries after clearing the session — the agent may have
       // written directly to entries.json during the session, and our
       // optimistic merge above wouldn't include those. A fresh load also
@@ -3681,7 +3837,7 @@ export default function App({ appId, token }) {
       finishInFlightRef.current = false
       setFinishing(false)
     }
-  }, [bumpSync, currentSession, entries, loadEntries, persist, store])
+  }, [currentSession, entries, loadEntries, persist, runSessionWrite])
 
   const resizeChatBy = useCallback((deltaPct) => {
     setChatHeight((value) => Math.min(82, Math.max(44, value + deltaPct)))
