@@ -2,7 +2,7 @@
   "id": "workout",
   "previous_id": "gym",
   "name": "Workout",
-  "version": "2.6.2",
+  "version": "2.6.3",
   "description": "Log workouts by chatting, and it tracks your PRs, trends, and streaks.",
   "author": "mobius-os",
   "license": "MIT",

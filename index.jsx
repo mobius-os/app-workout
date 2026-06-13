@@ -1709,8 +1709,15 @@ const CSS = `
   padding: max(12px, env(safe-area-inset-top)) 16px 10px;
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
-.wk-title { margin: 0; font-size: 18px; font-weight: 760; letter-spacing: 0; user-select: none; }
-.wk-subtitle { margin: 2px 0 0; font-size: 12px; color: var(--muted); user-select: none; }
+.wk-brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.wk-brand-icon { width: 26px; height: 26px; border-radius: 6px; object-fit: cover; flex-shrink: 0; display: block; }
+.wk-brand-fallback {
+  width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0;
+  align-items: center; justify-content: center;
+  background: var(--accent, currentColor); color: var(--bg, #0c0c0c);
+  font-weight: 700; line-height: 1;
+}
+.wk-subtitle { margin: 0; font-size: 12px; color: var(--muted); user-select: none; }
 /* /mobius-ui:Header */
 
 /* mobius-ui:Segmented v1 — keep in sync; library candidate. Diverge below the marker only. */
@@ -3963,8 +3970,23 @@ export default function App({ appId, token }) {
     <div className="wk-root">
       <style>{CSS}</style>
       <div className="wk-header">
-        <div>
-          <h1 className="wk-title">Workout</h1>
+        <div className="wk-brand">
+          {/* Brand mark: the app's real glossy icon (downscaled + cached),
+              no name text. Falls back to an accent dot when this install
+              has no custom icon and the route 404s. */}
+          <img
+            src={`/api/apps/${appId}/icon?size=64`}
+            alt=""
+            width={26}
+            height={26}
+            className="wk-brand-icon"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none'
+              const f = e.currentTarget.nextElementSibling
+              if (f) f.style.display = 'flex'
+            }}
+          />
+          <span className="wk-brand-fallback" style={{ display: 'none' }} aria-hidden="true">·</span>
           <p className="wk-subtitle">{subtitle}</p>
         </div>
         <SyncPill status={syncStatus} />
