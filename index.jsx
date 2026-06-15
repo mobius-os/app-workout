@@ -1305,17 +1305,38 @@ export {
 
 const CHAT_HEIGHT_CACHE_VERSION = 1
 
+// The chat panel collapses to just its composer pill so a logged-by-typing
+// session can hand most of the screen to the analytics above it. chatHeight is
+// stored as a percentage of the body (the panel uses flex-basis %), but the
+// real floor is a pixel quantity: CHAT_MIN_PX is the embed input pill (~48px) +
+// its 8px/8px foot padding — the panel can collapse to just the input + Send.
+// The CSS min-height pins the rendered floor at CHAT_MIN_PX regardless of the
+// stored percentage; the drag handler derives the matching min-percent from the
+// live body height. CHAT_MIN_PCT is only a backstop for the percentage setters
+// that run without a measured container — small enough that on any real screen
+// the CSS pixel floor, not the percentage, is what stops the drag.
+const CHAT_MIN_PX = 64
+const CHAT_MIN_PCT = 8
+const CHAT_MAX_PCT = 82
+const CHAT_DEFAULT_PCT = 64
+
 function chatHeightKey(appId) {
   return `workout:${appId}:chat-height:v${CHAT_HEIGHT_CACHE_VERSION}`
 }
 
+function clampChatPct(value) {
+  return Math.min(CHAT_MAX_PCT, Math.max(CHAT_MIN_PCT, value))
+}
+
 function readChatHeight(appId) {
-  if (typeof localStorage === 'undefined') return 64
+  if (typeof localStorage === 'undefined') return CHAT_DEFAULT_PCT
   const saved = localStorage.getItem(chatHeightKey(appId))
-  if (saved == null) return 64
+  if (saved == null) return CHAT_DEFAULT_PCT
   const raw = Number(saved)
-  if (!Number.isFinite(raw)) return 64
-  return Math.min(82, Math.max(44, raw))
+  if (!Number.isFinite(raw)) return CHAT_DEFAULT_PCT
+  // Clamp on read: a height saved under the old 44% floor must not strand the
+  // panel above the new minimum, and an over-tall value must not exceed the max.
+  return clampChatPct(raw)
 }
 
 // ---------------------------------------------------------------------------
@@ -1710,9 +1731,9 @@ const CSS = `
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .wk-brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
-.wk-brand-icon { width: 26px; height: 26px; border-radius: 6px; object-fit: cover; flex-shrink: 0; display: block; }
+.wk-brand-icon { width: 34px; height: 34px; border-radius: 8px; object-fit: cover; flex-shrink: 0; display: block; }
 .wk-brand-fallback {
-  width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0;
+  width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
   align-items: center; justify-content: center;
   background: var(--accent, currentColor); color: var(--bg, #0c0c0c);
   font-weight: 700; line-height: 1;
@@ -1755,7 +1776,9 @@ const CSS = `
 /* Resizable embedded-chat panel — app-specific drag chrome above the ChatEmbed. */
 .wk-chat-panel {
   flex: 0 0 auto;
-  min-height: min(360px, 70%);
+  /* Hard pixel floor = the composer pill; lets the panel collapse to just the
+     input + Send while the analytics above take the rest of the screen. */
+  min-height: 64px;
   max-height: calc(100% - 110px);
   display: flex; flex-direction: column;
   background: var(--bg);
@@ -3847,7 +3870,7 @@ export default function App({ appId, token }) {
   }, [currentSession, entries, loadEntries, persist, runSessionWrite])
 
   const resizeChatBy = useCallback((deltaPct) => {
-    setChatHeight((value) => Math.min(82, Math.max(44, value + deltaPct)))
+    setChatHeight((value) => clampChatPct(value + deltaPct))
   }, [])
 
   const beginChatResize = useCallback((event) => {
@@ -3859,12 +3882,16 @@ export default function App({ appId, token }) {
     if (!total) return
     const startY = event.clientY
     const startHeight = panel.getBoundingClientRect().height
-    const minPx = Math.min(360, total * 0.44)
+    const minPx = CHAT_MIN_PX
     const maxPx = Math.max(minPx, total - 110)
+    // The percentage that renders the pixel floor on THIS body height; never
+    // below CHAT_MIN_PCT so the setter stays inside its stored bounds.
+    const minPct = Math.max(CHAT_MIN_PCT, (minPx / total) * 100)
+    const maxPct = Math.min(CHAT_MAX_PCT, (maxPx / total) * 100)
 
     const onMove = (moveEvent) => {
       const nextPx = Math.min(maxPx, Math.max(minPx, startHeight + startY - moveEvent.clientY))
-      setChatHeight(Math.min(82, Math.max(44, (nextPx / total) * 100)))
+      setChatHeight(Math.min(maxPct, Math.max(minPct, (nextPx / total) * 100)))
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
@@ -3888,10 +3915,10 @@ export default function App({ appId, token }) {
       resizeChatBy(-4)
     } else if (event.key === 'Home') {
       event.preventDefault()
-      setChatHeight(44)
+      setChatHeight(CHAT_MIN_PCT)
     } else if (event.key === 'End') {
       event.preventDefault()
-      setChatHeight(82)
+      setChatHeight(CHAT_MAX_PCT)
     }
   }, [resizeChatBy])
 
@@ -3977,8 +4004,8 @@ export default function App({ appId, token }) {
           <img
             src={`/api/apps/${appId}/icon?size=64`}
             alt=""
-            width={26}
-            height={26}
+            width={34}
+            height={34}
             className="wk-brand-icon"
             onError={(e) => {
               e.currentTarget.style.display = 'none'
@@ -4085,8 +4112,8 @@ export default function App({ appId, token }) {
               role="separator"
               aria-label="Resize workout chat"
               aria-orientation="horizontal"
-              aria-valuemin={44}
-              aria-valuemax={82}
+              aria-valuemin={CHAT_MIN_PCT}
+              aria-valuemax={CHAT_MAX_PCT}
               aria-valuenow={Math.round(chatHeight)}
               tabIndex={0}
               onPointerDown={beginChatResize}
