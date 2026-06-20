@@ -516,7 +516,7 @@ function entriesFromCurrentSession(session) {
   if (!normalized || !currentSessionReady(normalized)) return []
   return normalized.entries.map((entry, index) => ({
     ...entry,
-    id: uid(),
+    id: entry.id || uid(),
     ts: normalized.startedAt + index * 1000,
     localDate: normalized.localDate,
     sessionId: normalized.id,
@@ -1604,6 +1604,20 @@ function makeStore(appId, token) {
   return { get, set, pendingCount, subscribe }
 }
 
+function isDurableSetResult(result) {
+  return !!(
+    result &&
+    result.error !== true &&
+    result.ok !== false &&
+    (result.synced === true || result.queued === true)
+  )
+}
+
+function requireDurableSetResult(result, path) {
+  if (isDurableSetResult(result)) return result
+  throw Object.assign(new Error(`${path} was not saved durably`), { result, path })
+}
+
 // ---------------------------------------------------------------------------
 // Embedded shell chat. Like the LaTeX app, Workout uses the real Möbius chat
 // iframe as the interaction surface. The sub-agent edits current_session.json;
@@ -1902,6 +1916,7 @@ const CSS = `
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 12px; border-bottom: 1px solid var(--border);
 }
+.wk-current-session-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .wk-current-session-title {
   margin: 0; display: flex; align-items: center;
   font-size: 14px; line-height: 1.25; font-weight: 800; letter-spacing: 0; user-select: none;
@@ -2041,12 +2056,17 @@ const CSS = `
   padding: 4px 10px; border-radius: 999px;
   font-size: 12px; font-weight: 600; letter-spacing: 0.2px; white-space: nowrap;
   background: transparent; border: 1px solid var(--border); color: var(--muted);
-  user-select: none;
+  font-family: var(--font); user-select: none;
 }
+button.wk-pill { cursor: pointer; }
 .wk-pill.is-pending { background: var(--surface2, var(--surface)); }
 .wk-pill.is-offline {
   background: var(--surface2, var(--surface));
   border-color: var(--accent); color: var(--accent);
+}
+.wk-pill.is-error {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  border-color: var(--danger); color: var(--danger);
 }
 /* /mobius-ui:SyncPill */
 
@@ -2198,11 +2218,15 @@ const CSS = `
 
 function useSyncStatus(store) {
   const [pending, setPending] = useState(0)
+  const [hasError, setHasError] = useState(false)
   const [online, setOnline] = useState(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true)
 
   const refresh = useCallback(async () => {
-    try { setPending(await store.pendingCount()) } catch { /* keep previous */ }
+    try {
+      const nextPending = await store.pendingCount()
+      setPending(nextPending)
+    } catch { /* keep previous */ }
   }, [store])
 
   useEffect(() => {
@@ -2219,16 +2243,28 @@ function useSyncStatus(store) {
     }
   }, [refresh])
 
-  // bump: called after a store.set to refresh pending count. Flash chrome
-  // removed (standard: nothing shown when online+idle).
-  const bump = useCallback(() => { refresh() }, [refresh])
+  // A write is durable only after the runtime synced it or accepted it into
+  // the offline queue; every other set result stays user-visible until retried.
+  const bump = useCallback((result) => {
+    if (result !== undefined) setHasError(!isDurableSetResult(result))
+    refresh()
+  }, [refresh])
 
-  return { pending, online, bump, refresh }
+  return { pending, online, hasError, bump, refresh }
 }
 
-// Standard: show nothing when online+idle. Only surface Offline state.
-function SyncPill({ status }) {
-  const { pending, online } = status
+// Standard: show nothing when online+idle unless the last write failed.
+function SyncPill({ status, onRetry }) {
+  const { pending, online, hasError } = status
+  if (hasError) {
+    return (
+      <button className="wk-pill is-error" type="button" onClick={onRetry}
+        title="The last save was not confirmed. Retry saving now."
+        aria-label="Save failed, retry">
+        Save failed · Retry
+      </button>
+    )
+  }
   if (online && pending === 0) return null
   const label = !online
     ? (pending > 0 ? `Offline · ${pending} pending` : 'Offline')
@@ -2398,9 +2434,7 @@ function ConfirmCard({
     setPendingCategory(k)
   }
 
-  const handleCommit = () => {
-    // Reassemble a "parsed" object in the LLM's loose shape, then hand it to
-    // normalizeEntry so storage is always SI regardless of what was typed.
+  const buildCommitDraft = () => {
     let metrics
     if (fam === 'strength') {
       metrics = { sets: sets.map((s) => ({ weight: metricNumber(s.weight), reps: metricNumber(s.reps), unit: s.unit })) }
@@ -2416,10 +2450,29 @@ function ConfirmCard({
       if (location) metrics.location = location
       if (note) metrics.note = note
     }
+    return { category, activity: activity.trim() || CATEGORIES[category].label, metrics }
+  }
+
+  const commitTs = () => {
     const nextTs = new Date(`${dateValue || localDate()}T${timeValue || '12:00'}`).getTime()
+    return Number.isFinite(nextTs) ? nextTs : Date.now()
+  }
+
+  const saveBlockedReason = sessionEntryMissing(normalizeEntry(buildCommitDraft(), {
+    id: 'confirm-preview',
+    ts: commitTs(),
+    raw: '',
+    source: 'manual',
+    confirmed: true,
+  }))
+
+  const handleCommit = () => {
+    if (saveBlockedReason) return
+    // Reassemble a "parsed" object in the LLM's loose shape, then hand it to
+    // normalizeEntry so storage is always SI regardless of what was typed.
     onCommit(
-      { category, activity: activity.trim() || CATEGORIES[category].label, metrics },
-      Number.isFinite(nextTs) ? nextTs : Date.now(),
+      buildCommitDraft(),
+      commitTs(),
     )
   }
 
@@ -2587,9 +2640,14 @@ function ConfirmCard({
       )}
 
       <div className="wk-spacer-16" />
-      <button className="wk-btn-primary" onClick={handleCommit} aria-label="Save entry">
+      <button className="wk-btn-primary" onClick={handleCommit} aria-label="Save entry"
+        disabled={!!saveBlockedReason}
+        title={saveBlockedReason ? `Missing: ${saveBlockedReason}` : 'Save entry'}>
         {commitLabel || (total > 1 && position < total ? 'Save and review next' : 'Save to log')}
       </button>
+      {saveBlockedReason && (
+        <p className="wk-current-session-missing">Missing: {saveBlockedReason}.</p>
+      )}
       <div className="wk-spacer-10" />
       <button className="wk-btn-secondary is-block" onClick={onCancel} aria-label="Discard entry">Discard</button>
 
@@ -2806,7 +2864,7 @@ function EntryCard({ entry, onDelete, onEdit }) {
   )
 }
 
-function SessionDraftCard({ entry }) {
+function SessionDraftCard({ entry, onDelete }) {
   const cat = CATEGORIES[entry.category] || CATEGORIES.other
   const icon = entry.icon || cat.icon
   const color = sportIconColor(icon, entry.category)
@@ -2822,11 +2880,19 @@ function SessionDraftCard({ entry }) {
         </div>
         <p className="wk-entry-meta">{summarizeMetrics(entry) || cat.label}</p>
       </div>
+      <div className="wk-entry-actions">
+        <button
+          className="wk-icon-btn"
+          onClick={() => onDelete(entry.id)}
+          aria-label={`Remove ${entry.activity} from current session`}
+          title="Remove"
+        >×</button>
+      </div>
     </div>
   )
 }
 
-function CurrentSessionPanel({ session, onFinish, finishing = false }) {
+function CurrentSessionPanel({ session, onFinish, onDeleteEntry, onClear, finishing = false }) {
   const normalized = useMemo(() => normalizeCurrentSession(session), [session])
   const entries = normalized?.entries || []
   const ready = currentSessionReady(normalized) && !finishing
@@ -2854,20 +2920,31 @@ function CurrentSessionPanel({ session, onFinish, finishing = false }) {
               : 'No activities yet'}
           </p>
         </div>
-        <button
-          type="button"
-          className="wk-finish-btn"
-          disabled={!ready}
-          onClick={onFinish}
-          aria-label="Finish session"
-          title={ready ? 'Finish session' : 'Finish session once required details are complete'}
-        >
-          Finish session
-        </button>
+        <div className="wk-current-session-actions">
+          <button
+            type="button"
+            className="wk-btn-ghost is-muted"
+            onClick={onClear}
+            aria-label="Clear current session"
+            title="Clear current session"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            className="wk-finish-btn"
+            disabled={!ready}
+            onClick={onFinish}
+            aria-label="Finish session"
+            title={ready ? 'Finish session' : 'Finish session once required details are complete'}
+          >
+            Finish session
+          </button>
+        </div>
       </div>
       {entries.length > 0 ? (
         <div className="wk-current-session-list">
-          {entries.map((entry) => <SessionDraftCard key={entry.id} entry={entry} />)}
+          {entries.map((entry) => <SessionDraftCard key={entry.id} entry={entry} onDelete={onDeleteEntry} />)}
         </div>
       ) : (
         <div className="wk-current-session-empty">Add an activity with Quick add, or tell the chat what you did.</div>
@@ -3525,12 +3602,10 @@ export default function App({ appId, token }) {
   const [bootStatus, setBootStatus] = useState('loading')
   const syncStatus = useSyncStatus(store)
   const saveQueueRef = useRef({ inFlight: false, pending: null })
-  // Re-entrancy guard for Finish session: the handler is async (awaits the
-  // current_session.json clear), so a fast double-tap would otherwise run
-  // entriesFromCurrentSession twice on the same draft — each call mints fresh
-  // uids, so both id-distinct copies survive the id-keyed merge and the
-  // session commits twice. The ref flips synchronously, blocking the second
-  // tap before React re-renders the disabled button.
+  const retryActionRef = useRef(null)
+  // Re-entrancy guard for Finish session: only one entries-first commit may
+  // own the current draft at a time; draft entry ids stay stable so retries
+  // merge instead of duplicating the same workout.
   const finishInFlightRef = useRef(false)
   // Serializes every current_session.json write (quick-add + Finish-clear) so
   // two local writes can't interleave a read-modify-write and lose an entry,
@@ -3560,6 +3635,7 @@ export default function App({ appId, token }) {
   const [quickAddDraft, setQuickAddDraft] = useState(null)
   const [lastEntryForQuickAdd, setLastEntryForQuickAdd] = useState(null)
   const [deletePending, setDeletePending] = useState(null) // entry id awaiting confirm
+  const [clearSessionPending, setClearSessionPending] = useState(false)
   const navHandleRef = useRef(null)
 
   const bumpSync = syncStatus.bump
@@ -3690,9 +3766,10 @@ export default function App({ appId, token }) {
         const loaded = await store.get('current_session.json')
         const fresh = normalizeCurrentSession(loaded)
         const next = transform(fresh)
-        setCurrentSession(next)
         const result = await store.set('current_session.json', next)
         bumpSync(result)
+        requireDurableSetResult(result, 'current_session.json')
+        setCurrentSession(next)
         return next
       } finally {
         sessionWriteInFlightRef.current = false
@@ -3718,8 +3795,17 @@ export default function App({ appId, token }) {
         const mergedEntries = mergeEntriesForSave(nextEntries, remoteEntries, pending.deletedIds)
         const result = await store.set('entries.json', mergedEntries)
         bumpSync(result)
+        requireDurableSetResult(result, 'entries.json')
         if (!q.pending) setEntries(mergedEntries)
       } catch (err) {
+        const latest = q.pending
+        q.pending = latest
+          ? {
+              entries: latest.entries,
+              deletedIds: [...new Set([...(pending.deletedIds || []), ...(latest.deletedIds || [])])],
+            }
+          : pending
+        retryActionRef.current = flushSaves
         // eslint-disable-next-line no-console
         console.error('entries save failed', err)
         bumpSync({ synced: false, error: true })
@@ -3727,8 +3813,10 @@ export default function App({ appId, token }) {
           message: err?.message || 'entries save failed',
           source: 'save',
         })
+        break
       }
     }
+    if (!q.pending) retryActionRef.current = null
     q.inFlight = false
   }, [store, bumpSync])
 
@@ -3763,12 +3851,6 @@ export default function App({ appId, token }) {
       source: 'manual',
       confirmed: true,
     })
-    // Dismiss the quick-add UI immediately; the write runs through the
-    // serialized current_session queue below.
-    closeNestedNav()
-    setQuickAddDraft(null)
-    setLastEntryForQuickAdd(null)
-    setTab('session')
     // Serialized read-modify-write: the queue re-reads the freshest store value
     // (the embedded agent co-writes current_session.json, and this client may
     // not have re-loaded its latest draft). Merge that fresh read with the
@@ -3776,12 +3858,26 @@ export default function App({ appId, token }) {
     // earlier un-flushed quick-add both survive, THEN append this entry. The
     // queue keeps two quick-adds (or a quick-add racing Finish) from
     // interleaving and dropping an entry.
-    await runSessionWrite((fresh) => {
-      const base = fresh || currentSession
-        ? mergeCurrentSessions(currentSession, fresh)
-        : null
-      return appendEntryToCurrentSession(base, entry, ts)
-    })
+    try {
+      await runSessionWrite((fresh) => {
+        const base = fresh || currentSession
+          ? mergeCurrentSessions(currentSession, fresh)
+          : null
+        return appendEntryToCurrentSession(base, entry, ts)
+      })
+    } catch (err) {
+      retryActionRef.current = () => commitQuickAdd(draft, ts)
+      window.mobius?.signal?.('error', {
+        message: err?.message || 'current session save failed',
+        source: 'quick_add',
+      })
+      return
+    }
+    closeNestedNav()
+    setQuickAddDraft(null)
+    setLastEntryForQuickAdd(null)
+    setTab('session')
+    retryActionRef.current = null
     window.mobius?.signal?.('item_created')
   }, [closeNestedNav, currentSession, runSessionWrite])
 
@@ -3809,35 +3905,81 @@ export default function App({ appId, token }) {
     window.mobius?.signal?.('item_deleted')
   }, [entries, persist])
 
+  const deleteDraftEntry = useCallback(async (id) => {
+    if (!id) return
+    try {
+      await runSessionWrite((fresh) => {
+        const base = mergeCurrentSessions(currentSession, fresh)
+        if (!base) return null
+        const nextEntries = base.entries.filter((entry) => entry.id !== id)
+        if (nextEntries.length === 0) return null
+        return normalizeCurrentSession({ ...base, entries: nextEntries }, base.startedAt)
+      })
+      retryActionRef.current = null
+    } catch (err) {
+      retryActionRef.current = () => deleteDraftEntry(id)
+      window.mobius?.signal?.('error', {
+        message: err?.message || 'current session save failed',
+        source: 'draft_delete',
+      })
+    }
+  }, [currentSession, runSessionWrite])
+
+  const clearCurrentSession = useCallback(async () => {
+    try {
+      await runSessionWrite(() => null)
+      closeNestedNav()
+      setClearSessionPending(false)
+      retryActionRef.current = null
+    } catch (err) {
+      retryActionRef.current = clearCurrentSession
+      window.mobius?.signal?.('error', {
+        message: err?.message || 'current session save failed',
+        source: 'session_clear',
+      })
+    }
+  }, [closeNestedNav, runSessionWrite])
+
   const finishCurrentSession = useCallback(async () => {
     if (finishInFlightRef.current) return
     if (!currentSessionReady(currentSession)) return
     finishInFlightRef.current = true
     setFinishing(true)
     try {
-      // Re-read + merge the freshest draft inside the serialized write queue,
-      // THEN commit. The agent may have appended a set to current_session.json
-      // moments before Finish that this client's poll hasn't merged yet;
-      // committing from the stale in-memory session would drop it, and the
-      // clear-to-null below would then erase it for good. Committing from the
-      // merged-fresh draft captures every co-writer's entry exactly once.
+      // The append-only log is durable before the draft can be cleared; until
+      // then the draft remains the recoverable source of truth for this finish.
       let committed = []
-      await runSessionWrite((fresh) => {
-        const merged = mergeCurrentSessions(currentSession, fresh)
-        committed = entriesFromCurrentSession(merged)
-        // Clear the draft only once its entries are committed below. Returning
-        // null here is the atomic clear; the commit to entries.json happens
-        // right after this write settles.
-        return null
+      let nextEntries = []
+      const run = sessionWriteRef.current.chain.then(async () => {
+        sessionWriteInFlightRef.current = true
+        try {
+          const loaded = await store.get('current_session.json')
+          const fresh = normalizeCurrentSession(loaded)
+          const merged = mergeCurrentSessions(currentSession, fresh)
+          committed = entriesFromCurrentSession(merged)
+          if (committed.length === 0) return []
+
+          const pendingEntries = saveQueueRef.current.pending?.entries || entries || []
+          const remoteEntries = await store.get('entries.json')
+          nextEntries = mergeEntriesForSave([...pendingEntries, ...committed], remoteEntries)
+          const entriesResult = await store.set('entries.json', nextEntries)
+          bumpSync(entriesResult)
+          requireDurableSetResult(entriesResult, 'entries.json')
+          setEntries(nextEntries)
+
+          const clearResult = await store.set('current_session.json', null)
+          bumpSync(clearResult)
+          requireDurableSetResult(clearResult, 'current_session.json')
+          setCurrentSession(null)
+          return nextEntries
+        } finally {
+          sessionWriteInFlightRef.current = false
+        }
       })
+      sessionWriteRef.current.chain = run.catch(() => {})
+      await run
       if (committed.length === 0) return
-      const nextEntries = mergeEntriesForSave([...(entries || []), ...committed], entries)
-      persist(nextEntries)
-      // Reload entries after clearing the session — the agent may have
-      // written directly to entries.json during the session, and our
-      // optimistic merge above wouldn't include those. A fresh load also
-      // settles any in-flight flushSaves race.
-      loadEntries({ allowMigration: false })
+      retryActionRef.current = null
 
       // Show a brief "Session saved" confirmation on the Session tab.
       clearTimeout(sessionSavedTimerRef.current)
@@ -3863,11 +4005,27 @@ export default function App({ appId, token }) {
           window.mobius?.signal?.('pr_hit', { exercise: pr.activity })
         }
       }
+    } catch (err) {
+      retryActionRef.current = finishCurrentSession
+      window.mobius?.signal?.('error', {
+        message: err?.message || 'finish session failed',
+        source: 'finish',
+      })
     } finally {
       finishInFlightRef.current = false
       setFinishing(false)
     }
-  }, [currentSession, entries, loadEntries, persist, runSessionWrite])
+  }, [bumpSync, currentSession, entries, store])
+
+  const retryFailedSave = useCallback(() => {
+    const retry = retryActionRef.current
+    if (retry) {
+      retry()
+      return
+    }
+    flushSaves()
+    syncStatus.refresh()
+  }, [flushSaves, syncStatus])
 
   const resizeChatBy = useCallback((deltaPct) => {
     setChatHeight((value) => clampChatPct(value + deltaPct))
@@ -3979,9 +4137,9 @@ export default function App({ appId, token }) {
   }, [closeNestedNav])
 
   useEffect(() => {
-    if (editingEntry || deletePending || quickAddDraft) return
+    if (editingEntry || deletePending || quickAddDraft || clearSessionPending) return
     closeNestedNav()
-  }, [editingEntry, deletePending, quickAddDraft, closeNestedNav])
+  }, [editingEntry, deletePending, quickAddDraft, clearSessionPending, closeNestedNav])
 
   useEffect(() => () => closeNestedNav(), [closeNestedNav])
 
@@ -4016,7 +4174,7 @@ export default function App({ appId, token }) {
           <span className="wk-brand-fallback" style={{ display: 'none' }} aria-hidden="true">·</span>
           <p className="wk-subtitle">{subtitle}</p>
         </div>
-        <SyncPill status={syncStatus} />
+        <SyncPill status={syncStatus} onRetry={retryFailedSave} />
       </div>
 
       {!editingEntry && !quickAddDraft && (
@@ -4082,6 +4240,8 @@ export default function App({ appId, token }) {
                       <CurrentSessionPanel
                         session={currentSession}
                         onFinish={finishCurrentSession}
+                        onDeleteEntry={deleteDraftEntry}
+                        onClear={() => setClearSessionPending(true)}
                         finishing={finishing}
                       />
                     )}
@@ -4143,6 +4303,15 @@ export default function App({ appId, token }) {
           confirmLabel="Delete"
           onConfirm={() => { deleteEntry(deletePending); closeNestedNav(); setDeletePending(null) }}
           onCancel={() => { closeNestedNav(); setDeletePending(null) }}
+        />
+      )}
+      {clearSessionPending && (
+        <ConfirmModal
+          title="Clear current session?"
+          body="This removes the draft workout. Finished history is not changed."
+          confirmLabel="Clear"
+          onConfirm={clearCurrentSession}
+          onCancel={() => { closeNestedNav(); setClearSessionPending(false) }}
         />
       )}
     </div>
