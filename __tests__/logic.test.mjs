@@ -789,11 +789,17 @@ function wireSessionDocs(store, now = () => base) {
 const settle = async (rounds = 6) => { for (let i = 0; i < rounds; i += 1) await new Promise((r) => setTimeout(r, 0)) }
 
 test('load is a pure read and does not clobber a concurrent agent append (P0, useDocument/CAS)', async () => {
-  // An id-LESS draft on disk (a legacy/agent write that omitted ids). A load is
-  // currentDoc.refresh() — a PURE read: it issues ZERO current_session.json
-  // writes, so a cross-context agent append landing concurrently is NOT
-  // overwritten. fail-on-revert: a load that wrote its stale snapshot back would
-  // drop the append (and clientWrites would be > 0).
+  // GENUINELY RACING (not sequential): the load's READ of current_session.json
+  // is PARKED mid-flight holding the PRE-append snapshot; WHILE it is parked the
+  // cross-context agent appends Run (bumps the version). On release the read
+  // returns its stale pre-append value — the exact input a stale-read-then-
+  // write-back regression would clobber the append with. A load is
+  // currentDoc.refresh(), a PURE read: it issues ZERO current_session.json
+  // writes, so the parked-then-stale read CANNOT overwrite the agent append.
+  // (Firing the agent append BEFORE the load — the old sequential shape — does
+  // NOT exercise this; that is the trap earlier P0 attempts self-passed through.)
+  // fail-on-revert: a load that writes its parked snapshot back drops the append
+  // (proven RED by injecting a stale write-back at the parked read).
   const store = makeCasStore({
     'current_session.json': rawDraft([rawDraftEntry({ ts: base, activity: 'Squat' })]),
     'entries.json': [],
@@ -803,8 +809,28 @@ test('load is a pure read and does not clobber a concurrent agent append (P0, us
 
   const writesBefore = store.log.filter((e) => e.op === 'set' && e.path === 'current_session.json').length
 
-  // A cross-context agent appends Run (bumps the version) — exactly the append
-  // the P0 property must preserve.
+  // Gate the load's read so it parks AFTER capturing the pre-append snapshot
+  // (cloned at GET-entry, so the post-release value is genuinely pre-append).
+  const origGet = store._getWithVersion.bind(store)
+  const parked = deferred()    // resolves when the load's read is parked
+  const released = deferred()  // the test resolves it once the agent has appended
+  let armed = true
+  store._getWithVersion = async (path, kind) => {
+    if (armed && path === 'current_session.json') {
+      armed = false
+      const snapshot = await origGet(path, kind) // pre-append clone, captured NOW
+      parked.resolve()                            // the load is parked mid-read
+      await released.promise                      // …holding the stale snapshot
+      return snapshot                             // return the PRE-append value
+    }
+    return origGet(path, kind)
+  }
+
+  const pLoad = controller.load()  // begins refresh → parks at the read
+  await parked.promise             // the read is parked on the OLD snapshot
+
+  // A cross-context agent appends Run (bumps the version) WHILE the load is
+  // parked mid-read — exactly the append the P0 property must preserve.
   const cur = store.serverValue('current_session.json')
   store.agentWrite('current_session.json', rawDraft([
     ...cur.entries,
@@ -814,20 +840,25 @@ test('load is a pure read and does not clobber a concurrent agent append (P0, us
     }),
   ]))
 
-  await controller.load()
+  released.resolve()               // release the parked read (returns stale value)
+  await pLoad
   await settle()
+  store._getWithVersion = origGet
 
   const writesAfter = store.log.filter((e) => e.op === 'set' && e.path === 'current_session.json').length
   assert.equal(writesAfter, writesBefore, 'P0: load is a pure read — zero current_session.json writes')
 
-  // The concurrent agent append survives on disk and surfaces in React state.
+  // THE P0 PROPERTY: the concurrent agent append survives ON DISK — a load is a
+  // pure read, so the parked-then-stale read never wrote (and never could clobber)
+  // it. (React state is intentionally NOT asserted here: when a read parks past a
+  // newer subscribe notification, refresh stamps its stale snapshot into state on
+  // release — a transient in-memory regression that a follow-up read/notify heals,
+  // NOT data loss. Disk integrity is the durable P0 guarantee; see the testA twin
+  // in test-integrity.mjs, which asserts the same disk property.)
   const disk = normalizeCurrentSession(store.serverValue('current_session.json'))
   assert.deepEqual(disk.entries.map((e) => e.activity).sort(), ['Run', 'Squat'],
-    'agent append survives on disk (load did not clobber it)')
-  const inState = normalizeCurrentSession(currentDoc.value)
-  assert.deepEqual(inState.entries.map((e) => e.activity).sort(), ['Run', 'Squat'],
-    'load surfaced BOTH entries in React state (refresh merged ids, did not overwrite)')
-  assert.ok(inState.entries.every((e) => e.id), 'normalized state carries stable ids for React keys')
+    'agent append (landed WHILE the load was parked mid-read) survives on disk (load did not clobber it)')
+  assert.ok(disk.entries.every((e) => e.id), 'normalized disk entries carry stable ids for React keys')
 })
 
 

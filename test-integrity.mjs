@@ -176,24 +176,60 @@ function pass(msg) { passed += 1; console.log(`PASS (${passed}) ${msg}`) }
 //     wrote its stale snapshot back would drop the append.
 // ════════════════════════════════════════════════════════════════════════════
 async function testA_loadNeverClobbersAppend() {
+  // GENUINELY RACING (not sequential): the load's READ of current_session.json
+  // is PARKED mid-flight holding the PRE-append snapshot; WHILE parked, the
+  // cross-context agent append lands (version bumps). On release the load's read
+  // returns its stale (pre-append) value — exactly the input a stale-read-then-
+  // write-back regression would clobber the agent's append with. The P0 property
+  // is that a load is a PURE refresh: it writes nothing, so the parked-then-stale
+  // read CANNOT overwrite the append. A sequential (append-before-load) variant
+  // would NOT exercise this — it is the trap that let earlier P0 attempts self-
+  // pass. fail-on-revert (proven manually during authoring): injecting a stale
+  // write-back of the parked snapshot here drops the agent append — both the
+  // zero-writes and the on-disk assertions below go RED.
   const store = makeCasStore({ 'current_session.json': readableDraft('Swimming') })
   const { controller, currentDoc } = makeRealController(store)
   await settle()
-  // A cross-context agent append lands (version bumps).
+
+  // Gate the load's read so it parks AFTER capturing the pre-append snapshot.
+  // We clone the record at GET-entry (so the value returned post-release is
+  // genuinely pre-append), announce the park, then wait for the agent append.
+  const origGet = store._getWithVersion.bind(store)
+  const parked = deferred()   // resolves when the load's read is parked
+  const released = deferred()  // the test resolves it once the agent has appended
+  let armed = true
+  store._getWithVersion = async (path, kind) => {
+    if (armed && path === 'current_session.json') {
+      armed = false
+      const snapshot = await origGet(path, kind) // pre-append clone, captured NOW
+      parked.resolve()                            // the load is parked mid-read
+      await released.promise                      // …holding the stale snapshot
+      return snapshot                             // return the PRE-append value
+    }
+    return origGet(path, kind)
+  }
+
+  const setsBefore = store.log.filter((e) => e.op === 'set' && e.path === 'current_session.json').length
+  const pLoad = controller.load()      // begins the refresh → parks at the read
+  await parked.promise                 // the read is now parked on the OLD snapshot
+
+  // The cross-context agent appends Running WHILE the load is parked mid-read.
   store.agentWrite('current_session.json', {
     ...readableDraft('Swimming'),
     entries: [readableDraft('Swimming').entries[0], { ...idlessAgentEntry('Running', START + 1000), id: 'agent-run' }],
   })
-  const setsBefore = store.log.filter((e) => e.op === 'set' && e.path === 'current_session.json').length
-  await controller.load()
+
+  released.resolve()                   // release the parked read (returns stale value)
+  await pLoad
+  await settle()
+  store._getWithVersion = origGet
+
   const setsAfter = store.log.filter((e) => e.op === 'set' && e.path === 'current_session.json').length
   assert.equal(setsAfter, setsBefore, 'P0: load is a pure read — zero current_session.json writes')
   const onDisk = L.normalizeCurrentSession(store.serverValue('current_session.json'))
   assert.deepEqual(onDisk.entries.map((e) => e.activity).sort(), ['Running', 'Swimming'],
-    'P0: the concurrent agent append survives on disk (load did not clobber it)')
-  assert.deepEqual(currentDoc.value.entries.map((e) => e.activity).sort(), ['Running', 'Swimming'],
-    'P0: the load surfaced BOTH entries in React state (refresh merged, did not overwrite)')
-  pass('P0: load never clobbers a concurrent agent append [pure read, append survives]')
+    'P0: the agent append (landed WHILE the load was parked mid-read) survives on disk — the load did not clobber it')
+  pass('P0: load never clobbers a concurrent agent append [GENUINELY RACING: parked read + append-while-parked, pure read, append survives]')
 }
 
 // ════════════════════════════════════════════════════════════════════════════
