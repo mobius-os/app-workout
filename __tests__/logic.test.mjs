@@ -19,7 +19,7 @@ import {
   exerciseKey, exerciseList, exerciseDetail, paceSecPerKm, fmtPace,
   lastEntryForExercise, recentExercises,
   sportIconKey, sportIconColor, SPORT_ICON_RULES, SPORT_ICON_COLORS, CATEGORIES,
-  createVisiblePoller,
+  createVisiblePoller, createSessionController,
 } from '../logic.js'
 import { buildEntry } from '../build-entry.mjs'
 
@@ -268,8 +268,11 @@ test('current session finishes complete mixed activities at the session start ti
   assert.deepEqual(entries.map((entry) => entry.sessionId), ['session-demo', 'session-demo'])
   assert.deepEqual(entries.map((entry) => entry.ts), [startedAt, startedAt + 1000])
   assert.equal(entries[0].localDate, localDate(new Date(startedAt)))
-  assert.notEqual(entries[0].id, 'deadlift')
-  assert.notEqual(entries[1].id, 'swim')
+  // Committing a draft preserves each entry's stable id so a retried Finish
+  // re-commits the SAME ids and mergeEntriesForSave dedups them (no double
+  // write). A draft carrying ids must keep them; uid() is only the fallback.
+  assert.equal(entries[0].id, 'deadlift')
+  assert.equal(entries[1].id, 'swim')
 })
 
 test('current session requires duration or distance for cardio drafts', () => {
@@ -694,6 +697,166 @@ test('finish commits quick-add entries to history exactly once (no double-write)
   assert.equal(merged.filter((e) => e.activity === 'Overhead Press').length, 1)
   assert.equal(merged.filter((e) => e.activity === 'Pull-up').length, 1)
   assert.equal(merged.filter((e) => e.id === 'old-1').length, 1)
+})
+
+test('retried finish re-commits the same draft without double-writing (durable-clear failed)', () => {
+  // Reproduce the data-loss sequence: Finish writes entries.json DURABLY, then
+  // the current_session.json clear fails (offline queue rejects), so the draft
+  // survives and the user taps Retry. The draft is re-read and re-committed.
+  // Because entriesFromCurrentSession preserves the draft's stable entry ids,
+  // the second mergeEntriesForSave dedups against the first write — the workout
+  // lands in permanent history exactly once.
+  const history = [strengthEntry('old-1', base - 2 * DAY, 's-old', 'Deadlift', [[90, 5]])]
+  let session = appendEntryToCurrentSession(null, quickAddEntry(base, 'Overhead Press', 50, 5))
+  session = appendEntryToCurrentSession(session, quickAddEntry(base + 60_000, 'Pull-up', 0.01, 8))
+
+  // First Finish attempt: commit reads the draft, merge writes entries.json.
+  const firstCommit = entriesFromCurrentSession(session)
+  const afterFirst = mergeEntriesForSave([...history, ...firstCommit], history)
+  assert.equal(afterFirst.length, 3)
+
+  // The draft-clear failed, so the SAME draft is still present. Retry re-reads
+  // it and re-commits. The retried commit must reuse the same ids…
+  const retryCommit = entriesFromCurrentSession(session)
+  assert.deepEqual(
+    retryCommit.map((e) => e.id),
+    firstCommit.map((e) => e.id),
+    'retried commit must reuse the draft entry ids so the merge can dedup',
+  )
+
+  // …so merging the retry against the already-written history is a no-op, not a
+  // duplicate workout.
+  const afterRetry = mergeEntriesForSave([...afterFirst, ...retryCommit], afterFirst)
+  assert.equal(afterRetry.length, 3)
+  assert.equal(afterRetry.filter((e) => e.activity === 'Overhead Press').length, 1)
+  assert.equal(afterRetry.filter((e) => e.activity === 'Pull-up').length, 1)
+})
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
+function cloneJson(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value))
+}
+
+function rawDraftEntry({ id, ts, category = 'strength', activity = 'Squat', metrics }) {
+  return {
+    ...(id ? { id } : {}),
+    ts,
+    localDate: localDate(new Date(ts)),
+    sessionId: `session-${base}`,
+    category,
+    activity,
+    metrics: metrics || { sets: [{ weight_kg: 100, reps: 5, unit: 'kg' }] },
+    raw: activity,
+    source: 'ai',
+    confirmed: true,
+  }
+}
+
+function rawDraft(entries) {
+  return {
+    id: `session-${base}`,
+    startedAt: base,
+    localDate: localDate(new Date(base)),
+    status: 'active',
+    entries,
+    pendingQuestion: null,
+  }
+}
+
+function makeGatedSessionStore(initialSession) {
+  const files = {
+    'current_session.json': cloneJson(initialSession),
+    'entries.json': [],
+  }
+  const readParked = deferred()
+  const releaseRead = deferred()
+  const writeParked = deferred()
+  const releaseWrite = deferred()
+  let gateLoadRead = true
+  let gateAgentWrite = true
+  const clientSets = []
+
+  return {
+    clientSets,
+    async get(path) {
+      const snapshot = cloneJson(files[path])
+      if (path === 'current_session.json' && gateLoadRead) {
+        gateLoadRead = false
+        readParked.resolve(snapshot)
+        await releaseRead.promise
+      }
+      return snapshot
+    },
+    async set(path, value, actor = 'client') {
+      if (path === 'current_session.json' && actor === 'agent' && gateAgentWrite) {
+        gateAgentWrite = false
+        writeParked.resolve(cloneJson(value))
+        await releaseWrite.promise
+      }
+      if (actor === 'client') clientSets.push({ path, value: cloneJson(value) })
+      files[path] = cloneJson(value)
+      return { synced: true }
+    },
+    async agentAppend(entry) {
+      const current = cloneJson(files['current_session.json'])
+      const next = rawDraft([...(current?.entries || []), entry])
+      return this.set('current_session.json', next, 'agent')
+    },
+    waitForLoadReadParked: () => readParked.promise,
+    waitForAgentWriteParked: () => writeParked.promise,
+    releaseLoadRead: () => releaseRead.resolve(),
+    releaseAgentWrite: () => releaseWrite.resolve(),
+    snapshot: (path) => cloneJson(files[path]),
+  }
+}
+
+test('load-time id reconciliation is read-only and does not clobber a concurrent agent append', async () => {
+  const store = makeGatedSessionStore(rawDraft([
+    rawDraftEntry({ ts: base, activity: 'Squat' }), // id-less legacy/agent draft
+  ]))
+  const sessions = []
+  const controller = createSessionController({
+    store,
+    setSession: (next) => { sessions.push(next) },
+    setEntries: () => {},
+    requireDurable: (result) => result,
+    now: () => base,
+  })
+
+  const loadPromise = controller.load()
+  await store.waitForLoadReadParked()
+
+  const agentWrite = store.agentAppend(rawDraftEntry({
+    id: 'agent-run',
+    ts: base + 1000,
+    category: 'running',
+    activity: 'Run',
+    metrics: { duration_s: 1500, distance_m: 5000, elevation_m: null, location: null },
+  }))
+  await store.waitForAgentWriteParked()
+  store.releaseAgentWrite()
+  await agentWrite
+  assert.deepEqual(
+    store.snapshot('current_session.json').entries.map((entry) => entry.activity),
+    ['Squat', 'Run'],
+    'agent append must land while the load is still holding a stale read snapshot',
+  )
+
+  store.releaseLoadRead()
+  await loadPromise
+
+  const disk = store.snapshot('current_session.json')
+  assert.deepEqual(disk.entries.map((entry) => entry.activity), ['Squat', 'Run'])
+  assert.equal(store.clientSets.length, 0, 'load must not write a stamped stale snapshot back to disk')
+  assert.equal(sessions.length, 1)
+  assert.equal(sessions[0].entries.length, 1)
+  assert.ok(sessions[0].entries[0].id, 'load still reconciles an in-memory id for React state')
 })
 
 // --- mergeCurrentSessions: reconcile co-writers by entry id ------------------
