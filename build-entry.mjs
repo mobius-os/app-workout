@@ -31,6 +31,13 @@ const TEST_EXPORTS = [
   'recentExercises',
   'sportIconKey',
   'sportIconColor',
+  'makeEntriesDocConfig',
+  'makeCurrentSessionDocConfig',
+  'docItemIdentity',
+  'createSessionController',
+  'reconcileDraftIds',
+  'currentSessionNeedsIdAssignment',
+  'stableHash',
 ]
 
 export function stripExports(logicSource) {

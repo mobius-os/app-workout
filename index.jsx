@@ -1519,257 +1519,238 @@ function createVisiblePoller(tick, { doc, win, intervalMs = 5000 }) {
 }
 
 // ---------------------------------------------------------------------------
-// Serialized session-state controller — the ONE owner of all session state.
+// useDocument config factories — the PROVEN merge/identity semantics, packaged
+// as pure functions so they are the SAME params index.jsx hands the hooks AND
+// the concurrency tests extract and drive. They carry no React and no store, so
+// the data-loss guarantees they encode are unit-testable in isolation.
+// ---------------------------------------------------------------------------
+
+// Stable content key for an entry-shaped item: its id when present, else a
+// content hash (defaultIdentity in the runtime would stableStringify; a hash is
+// cheaper and stable). Shared by both docs so an id-less item never aliases.
+function docItemIdentity(item) {
+  return item && item.id != null ? String(item.id) : stableHash(item)
+}
+
+// entries.json doc config. identity = the stable entry id; merge = the proven
+// mergeEntriesForSave(local, remote, deleted) — union by id, censored by the
+// WHOLE accumulated tombstone set (read fresh from getTombstones() on every
+// merge, so a CAS reread-remerge re-applies the absorbing barrier), sorted by
+// ts. `mine` is the optimistic local result, `theirs` the fresh remote.
+function makeEntriesDocConfig(getTombstones) {
+  return {
+    initial: () => [],
+    identity: docItemIdentity,
+    merge: (base, mine, theirs) => mergeEntriesForSave(mine, theirs, getTombstones()),
+    mode: 'cas',
+  }
+}
+
+// current_session.json doc config. A single object (not an array), so the merge
+// is mergeCurrentSessions after reconcileDraftIds maps an id-less remote rewrite
+// onto the optimistic ids by CONTENT signature (the id-churn fix). prefer:'local'
+// keeps the user's just-edited copy from being reverted by a slightly older
+// remote read. A null `mine` is an EXPLICIT clear (Finish's final step, Clear
+// session, a draft emptied of its last entry): mergeCurrentSessions treats a
+// null side as "no opinion, take the other" — right for a load-time merge, wrong
+// for an authored clear — so a null mine here returns null and the clear wins.
+// (The write path is the ONLY caller of this merge; refresh/subscribe reconcile
+// by identity, never through here.)
+function makeCurrentSessionDocConfig() {
+  return {
+    initial: null,
+    identity: docItemIdentity,
+    merge: (base, mine, theirs) => {
+      if (mine == null) return null
+      // Normalize `mine` FIRST so an id-less optimistic draft (an agent rewrite
+      // that omitted ids, surfaced by a pure refresh that does not mint) gains
+      // STABLE per-entry ids before reconciliation. Without this, both `mine` and
+      // an id-less `theirs` would each mint independent random ids and union into
+      // a DUPLICATE. With it, reconcileDraftIds matches `theirs`'s id-less content
+      // against `mine`'s now-stable ids by CONTENT signature, so the two converge
+      // on ONE entry. (mine is captured once per update, so it is stable across
+      // CAS retries; content-signature reconcile converges any cross-read drift.)
+      const normalizedMine = normalizeCurrentSession(mine, Date.now()) || mine
+      return mergeCurrentSessions(normalizedMine, reconcileDraftIds(theirs, normalizedMine), { prefer: 'local' })
+    },
+    mode: 'cas',
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Session-state orchestrator over TWO useDocument handles (mobius runtime).
 //
-// WHY THIS EXISTS (the structural fix). Session state used to be governed by
-// THREE independent concurrency primitives that coordinated through flags:
-//   - a write chain for current_session.json writes,
-//   - a single-flight gate for current_session.json reads,
-//   - a separate queue for entries.json writes,
-// with a load bailing out when a write was "in flight" and a load's id-stamp
-// reaching ACROSS into the write chain. Reads and writes of the SAME file ran
-// on DIFFERENT primitives. Every race a skeptic found lived in the SEAMS
-// between them: a load that captured the draft just before finish() cleared it
-// then wrote it back (load-vs-finish resurrection); an id-less file left on
-// disk when a swallowed persist-back cleared the single-flight gate; an app
-// switch sharing a stale in-flight load; two loads minting competing ids. You
-// cannot patch a seam away — you remove the seams by removing the separate
-// primitives. So this controller is the SINGLE serialized owner of:
-//   - the in-memory current_session source of truth (`this.session`),
-//   - every read / mint / merge / write of current_session.json,
-//   - every write of entries.json,
-//   - the Finish transition (commit-entries-then-clear-draft).
+// WHAT THIS OWNS — and what it no longer does. Workout once shipped TWO bespoke
+// serialized-write engines: a current_session.json read-merge-write chain (with
+// its own in-flight gate + load id-stamp) and a separate entries.json queue
+// (with a per-slot deletedIds resurrection bug). Both re-implemented, by hand,
+// the read-the-fresh-remote → merge-on-stable-identity → durable-write loop —
+// AND a whole-file last-write-wins write with NO compare-and-swap, which left a
+// genuine cross-context residual OPEN: finish() (or any whole-file write) racing
+// a concurrent embedded-agent append could still lose the append in a TOCTOU
+// window (documented, unclosable without a platform CAS primitive).
 //
-// INVARIANT: no two intents ever interleave. Every external trigger
-// (mount-load, subscribe callback, poll tick, onEntriesMaybeChanged, quick-add,
-// edit, delete, finish, retry) ENQUEUES an intent; intents run STRICTLY ONE AT
-// A TIME on a single promise chain. Because finish runs as one indivisible
-// intent on that chain, a load can never observe a half-finished transition,
-// and a load's write can never land after finish cleared the draft: the load
-// either ran entirely before finish (its write is then superseded by finish's
-// clear) or entirely after (it reads the already-null file and writes nothing).
+// The platform now ships that primitive: useDocument(path, { merge, identity,
+// mode:'cas' }). Its update(fn) reads the server version token, merges the fresh
+// remote against the optimistic value on stable identity, PUTs with If-Match,
+// and on a 412 conflict RE-READS + RE-MERGES + RETRIES (bounded). So the two
+// engines collapse to two docs, and the cross-context finish-vs-agent race is
+// CLOSED: a concurrent append the writer did not see is preserved through the
+// 412 reread-remerge loop, not lost. The PROVEN merge/identity semantics are
+// passed UNCHANGED as the docs' merge/identity params (mergeEntriesForSave +
+// id identity for entries; mergeCurrentSessions + reconcileDraftIds for the
+// draft) — this orchestrator deletes the machinery, never the semantics.
 //
-// PROCESS-TIME FRESHNESS: each intent re-reads the latest remote AT PROCESS
-// TIME (not enqueue time), merges it against the single in-memory truth honoring
-// the accumulated tombstone set + stable per-entry ids, persists, and updates
-// React state. A stale enqueue-time snapshot is therefore never written.
+// THIS LAYER's remaining job is the part useDocument cannot own: the cross-FILE
+// Finish transition (stamp the draft's reconciled ids → commit them to
+// entries.json → clear the draft) must be ONE indivisible sequence so a load /
+// quick-add can never observe a half-finished transition. Each step is a single
+// doc.update/doc.set (each self-serialized + CAS on its own file); the controller
+// sequences the steps and never starts a second Finish while one is in flight,
+// so commit always precedes clear and the load-vs-finish resurrection is
+// impossible by construction.
 //
-// NON-DURABLE WRITES: a write whose result is not durable (an {error}/{ok:false}
-// or a result that is neither synced nor queued) KEEPS the in-memory truth and
-// re-throws. The controller does NOT advance `this.session` past a write it
-// could not land, so a sibling re-read can never see an un-id-stamped file the
-// controller believed it had stamped. ({queued:true} IS durable — the runtime's
-// IndexedDB outbox replays it on reconnect — so it is treated as success.)
+// P0 PROPERTY (must hold): a load NEVER clobbers a concurrent agent append — load
+// is currentDoc.refresh(), a pure read; it issues ZERO current_session.json
+// writes. The id-churn an id-less agent rewrite used to cause is now owned by the
+// doc's identity reconciliation (reconcileDraftIds, by content signature), run
+// inside the merge.
 //
-// SCOPE / KEYING: one controller instance per app instance (keyed by the
-// store/appId the React layer threads in via useMemo). An app switch builds a
-// FRESH controller with its own chain, in-memory truth, and tombstones, so a
-// stale in-flight load from the previous app can never write into the new one.
+// TOMBSTONES are an absorbing barrier owned here (a deleted id never resurrects):
+// they are closed over by the entries doc's merge, so EVERY entries write — local
+// or a CAS reread-remerge — re-applies the WHOLE set against the fresh remote.
 //
-// PURE + INJECTED: no React, no DOM, no window. `deps` injects the store,
-// React state setters, durability check, error sink, and signal emitter, so the
-// whole serialization is provable under `node --test` with fakes.
+// PURE + INJECTED: no React, no DOM, no window. `deps` injects the two doc
+// handles (each shaped like useDocument's return), the tombstone accessors, an
+// error sink, and a signal emitter — so the whole orchestration is provable
+// under `node --test` with a mocked CAS store driving real useDocument handles.
 // ---------------------------------------------------------------------------
 function createSessionController(deps) {
   const {
-    store,
-    setSession,
-    setEntries,
-    requireDurable,
+    entriesDoc,
+    currentDoc,
+    addTombstones = () => {},
     onWriteError = () => {},
-    signal = () => {},
     now = () => Date.now(),
   } = deps
 
-  // The single in-memory source of truth for current_session.json. Only an
-  // intent running on the chain reads or writes this — never a closure outside
-  // the chain — so it is always the latest committed draft.
-  let session = null
-  // Absorbing-barrier tombstone set for entries.json. Once an id is deleted it
-  // is never resurrected: every entries write applies the WHOLE set. Re-adding
-  // the "same" workout mints a fresh uid, so a permanent tombstone of the OLD
-  // id never blocks a genuine re-add. Never pruned against remote absence (a
-  // just-deleted id is by definition absent from remote).
-  const tombstones = new Set()
-  // The serial chain. Every intent is `.then`-chained here, so two intents can
-  // never interleave their read-modify-write. `.catch(()=>{})` on the tail keeps
-  // one failed intent from wedging the chain; callers still see the rejection
-  // through the promise the enqueue returns.
-  let chain = Promise.resolve()
+  // Serialize ONLY the cross-file Finish against itself and against draft
+  // transforms that must not interleave a half-finished transition. Per-file
+  // read-merge-write serialization + CAS is owned by each doc; this chain exists
+  // for the cross-document ordering useDocument cannot see.
+  let finishChain = Promise.resolve()
   let disposed = false
 
-  function enqueue(work) {
-    const run = chain.then(() => (disposed ? undefined : work()))
-    chain = run.catch(() => {})
-    return run
-  }
-
-  // Disposal is checked at enqueue time (before work starts) AND again after
-  // every await inside an intent, because dispose() can fire while an intent is
-  // parked on a store read/write. A disposed controller belongs to an app the
-  // user switched away from: it must neither write the old app's draft back to
-  // the (now-foreign) store nor push the old app's state into React, or it would
-  // contaminate the new app. throwIfDisposed() aborts the in-flight intent the
-  // instant it resumes onto a disposed controller; the abort is swallowed by the
-  // chain's `.catch` and surfaced to the caller as a rejection.
   function throwIfDisposed() {
     if (disposed) throw new Error('controller disposed')
   }
 
-  // ---- current_session.json: load / merge / in-memory id reconciliation ----
-  // Re-read fresh remote, reconcile id-less entries against the in-memory truth,
-  // and merge for React state only. Load must be a pure read: whole-file storage
-  // is last-write-wins with no CAS, so writing the reconciled load snapshot back
-  // can clobber an embedded-agent append that landed after this load's read.
-  // Correctness does not require the load-time stamp on disk; reconcileDraftIds
-  // is deterministic by authored content, independent readers converge in memory,
-  // and finish() is the authoritative point that persists reconciled ids before
-  // committing entries.json.
-  //
-  // Residual limitation: Even with the load-time write removed/guarded, the
-  // genuine cross-context race remains: finish() (or any whole-file write) vs a
-  // concurrent embedded-agent append under whole-file LWW with no CAS can still
-  // lose data in a TOCTOU window. Closing that fully requires a platform-level
-  // compare-and-swap / conditional-write storage primitive.
+  // ---- current_session.json: load (pure read) ------------------------------
+  // A load is currentDoc.refresh(): re-read the fresh remote and reconcile
+  // id-less entries against the in-memory optimistic value (the doc's identity =
+  // reconcileDraftIds by content signature). It writes NOTHING — the P0 property.
+  // A concurrent agent append landing after the read is preserved on the next
+  // read/merge, never overwritten.
   async function processLoad() {
-    const loaded = await store.get('current_session.json')
-    throwIfDisposed() // app switched away while parked on the read — abort
-    // RECONCILE id-less entries against the in-memory truth BEFORE normalizing or
-    // merging. This is the root-cause fix: an id-less entry reuses the id of its
-    // authored-content match in `session`, so two reads of the same id-less disk
-    // state converge on the SAME ids. Without this, normalize would mint a FRESH
-    // random id per read and mergeCurrentSessions (keyed on id) would union the
-    // two reads into a DUPLICATE.
-    const reconciled = reconcileDraftIds(loaded, session)
-    const remote = normalizeCurrentSession(reconciled, now())
-    if (remote == null) {
-      // Authoritative clear (finished/cleared anywhere). Replace in-memory
-      // truth and React state with null — never merge a stale local draft back.
-      if (session !== null) { session = null; setSession(null) }
-      return null
-    }
-    const merged = mergeCurrentSessions(session, remote, { prefer: 'remote', now: now() })
-    // Do not stamp this load result back to current_session.json. A load snapshot
-    // may be stale relative to an embedded-agent append; writing it would be a
-    // whole-file LWW overwrite. The reconciled ids live in memory for React keys
-    // and draft transforms, and finish() persists them at the commit boundary.
-    // No-op churn guard: the visible-tab poll calls this every few seconds;
-    // replacing state with a deep-equal object every tick would re-render the
-    // whole Session view for nothing. Compare against the in-memory truth.
-    if (stableStringify(session) === stableStringify(merged)) return session
-    session = merged
-    setSession(merged)
-    return merged
+    throwIfDisposed()
+    await currentDoc.refresh()
+    throwIfDisposed()
+    return currentDoc.value
   }
 
   // ---- current_session.json: arbitrary transform (quick-add / delete / clear)
-  // The transform receives the FRESH-at-process-time merge of the in-memory
-  // truth with the latest remote (so a co-writer agent's entry the caller never
-  // saw still survives) and returns the next draft (or null to clear). Runs on
-  // the chain, so two quick-adds — or a quick-add racing finish — are strictly
-  // ordered and can never lose an entry to an interleaved read-modify-write.
+  // currentDoc.update(fn) is a serialized read-merge-write under CAS: fn appends
+  // to the optimistic value, the doc merges the FRESH remote (so a co-writer
+  // agent entry the caller never saw survives) on stable identity, and a 412
+  // reread-remerges. So two quick-adds — or a quick-add racing an agent append —
+  // can never lose an entry to an interleaved read-modify-write. A non-durable
+  // write rejects (doc.update rejects with DurableWriteError); a {queued} offline
+  // write resolves (durable via the outbox).
   async function processSessionTransform(transform) {
-    const loaded = await store.get('current_session.json')
-    throwIfDisposed() // app switched away while parked on the read — abort
-    // Reconcile a co-writer's id-less rewrite against the in-memory truth before
-    // merging, so a quick-add/delete never unions a re-minted duplicate of an
-    // entry already in `session` (same root-cause fix as processLoad).
-    const fresh = normalizeCurrentSession(reconcileDraftIds(loaded, session), now())
-    const base = mergeCurrentSessions(session, fresh, { prefer: 'local', now: now() })
-    const next = await transform(base, fresh)
-    throwIfDisposed() // transform may be async; abort before writing if disposed
-    const result = await store.set('current_session.json', next)
-    throwIfDisposed() // app switched away while parked on the write — abort
-    requireDurable(result, 'current_session.json')
-    session = next
-    setSession(next)
-    return next
+    throwIfDisposed()
+    await currentDoc.update((base) => transform(base))
+    throwIfDisposed()
+    return currentDoc.value
   }
 
-  // ---- entries.json: serialized write (edit / delete / migration / boot) ---
-  // Folds this intent's deletions into the permanent tombstone set, re-reads the
-  // freshest remote, applies the WHOLE tombstone set then the upserts, writes,
-  // and updates React state. On the chain, so a history edit/delete can never
-  // race finish's commit and resurrect or revert a row.
-  async function processEntriesWrite(intent) {
-    for (const id of intent.deletedIds || []) tombstones.add(id)
-    const remoteEntries = await store.get('entries.json')
-    throwIfDisposed() // app switched away while parked on the read — abort
-    const mergedEntries = applyEntriesWriteMutation(remoteEntries, {
-      upsertEntries: intent.upsertEntries || [],
-      deletedIds: [...tombstones],
-    })
-    const result = await store.set('entries.json', mergedEntries)
-    throwIfDisposed() // app switched away while parked on the write — abort
-    requireDurable(result, 'entries.json')
-    setEntries(mergedEntries)
-    return mergedEntries
+  // ---- entries.json: serialized write (edit / delete / migration / boot) ----
+  // Fold this intent's deletions into the permanent tombstone set, then
+  // entriesDoc.update applies the WHOLE set (closed over by the doc's merge) to
+  // the fresh remote under CAS. So a history edit/delete can never race finish's
+  // commit and resurrect or revert a row, and a stale upsert of a deleted id is
+  // censored on every write — local and CAS-retry alike.
+  async function processEntriesWrite(intent = {}) {
+    throwIfDisposed()
+    const deletedIds = intent.deletedIds || []
+    addTombstones(deletedIds)
+    const upserts = intent.upsertEntries || []
+    await entriesDoc.update((prev) => applyEntriesWriteMutation(prev, {
+      upsertEntries: upserts,
+      // Apply THIS intent's deletions to the optimistic `mine` so a deleted row
+      // disappears from the UI immediately (no flicker). The doc's merge then
+      // re-applies the WHOLE accumulated tombstone set against the fresh remote
+      // under CAS, so the absorbing barrier still censors a stale upsert from any
+      // earlier delete — this slice is for snappy optimism, the merge for safety.
+      deletedIds,
+    }))
+    throwIfDisposed()
+    return entriesDoc.value
   }
 
-  // ---- Finish: STAMP the draft's ids to disk, commit to entries.json, THEN
-  //      clear the draft ----------------------------------------------------
-  // One indivisible intent. It re-reads + reconciles + merges the freshest draft,
-  // commits its ready entries to entries.json DURABLY (same tombstone-honoring
-  // path as every other entries write), then clears current_session.json. Because
-  // it is a single chain step, no load/quick-add can interleave: the
-  // load-vs-finish resurrection is impossible by construction.
+  // ---- Finish: STAMP ids → COMMIT to entries.json → CLEAR the draft ---------
+  // One indivisible cross-file sequence on the finish chain. Each step is a CAS
+  // doc write; the controller orders them (commit BEFORE clear) and runs no
+  // second Finish concurrently, so a load/quick-add cannot observe a
+  // half-finished transition.
   //
-  // CROSS-RETRY IDEMPOTENCY. The committed ids must be RECOVERABLE so a retried
-  // Finish (even from a FRESH controller whose `session` started null) re-derives
-  // the SAME ids and mergeEntriesForSave dedups instead of double-writing. A
-  // freshly-reconciled id-less draft has ids that exist ONLY in `committed` and
-  // `session` — not yet on disk. If the clear then fails/aborts, the on-disk
-  // draft is still id-less, and a later Finish would mint DIFFERENT ids for the
-  // same workout → a duplicate that survives in entries.json (distinct ids don't
-  // dedup). So we PERSIST the id-stamped merged draft back to the file BEFORE
-  // committing whenever the read was id-less. Then the recoverable on-disk draft
-  // carries the same stable ids entriesFromCurrentSession will re-commit, and the
-  // retry dedups. The persist-back is durability-gated like every other write.
+  // CROSS-RETRY IDEMPOTENCY. A retried Finish (even from a FRESH controller whose
+  // docs reloaded from disk) must re-derive the SAME committed ids so
+  // mergeEntriesForSave dedups instead of double-writing. entriesFromCurrentSession
+  // preserves the draft's stable ids; the STAMP step persists reconciled ids to
+  // the draft FIRST when the read was id-less, so a failed clear leaves an
+  // id-BEARING recoverable draft a retry re-commits identically.
   async function processFinish() {
-    const loaded = await store.get('current_session.json')
-    throwIfDisposed() // app switched away while parked on the read — abort
-    // Reconcile an id-less co-writer rewrite against the in-memory truth before
-    // committing, so Finish commits ONE row per entry (not a re-minted dup) and
-    // the committed ids are the same stable ids a retry would re-derive.
-    const fresh = normalizeCurrentSession(reconcileDraftIds(loaded, session), now())
-    const merged = mergeCurrentSessions(session, fresh, { prefer: 'local', now: now() })
-    const committed = entriesFromCurrentSession(merged)
-    if (committed.length === 0) {
-      // Nothing ready to commit (the draft is empty/unready). Leave the draft.
-      session = merged
-      setSession(merged)
-      return { committed: [], entries: null }
-    }
-    // Stamp the reconciled ids to disk FIRST when the read was id-less, so the
-    // recoverable draft carries the ids we are about to commit. A retry then
-    // re-reads an id-BEARING draft and re-commits the SAME ids (dedup), even from
-    // a fresh controller. Durability-gated: a non-durable stamp aborts before any
-    // commit, leaving the in-memory truth and on-disk draft unchanged.
-    if (currentSessionNeedsIdAssignment(loaded)) {
-      const stampResult = await store.set('current_session.json', merged)
+    throwIfDisposed()
+    // STAMP: an id-less draft (agent omitted ids) gets reconciled ids persisted
+    // FIRST, durably, so the recoverable on-disk draft carries the ids we commit.
+    // currentDoc.update is a CAS write; its merge already reconciles id-less
+    // entries against the optimistic truth, so this also folds in any concurrent
+    // agent append before we read the committable set. A no-op when already
+    // id-bearing (merge returns an equivalent value).
+    if (currentSessionNeedsIdAssignment(currentDoc.value)) {
+      await currentDoc.update((base) => base)
       throwIfDisposed()
-      requireDurable(stampResult, 'current_session.json')
     }
-    // Commit to the append-only log DURABLY.
-    const nextEntries = await processEntriesWrite({ upsertEntries: committed })
-    throwIfDisposed() // app switched away during the commit — abort before clear
-    // Only now clear the draft — entries.json is durable, so the workout cannot
-    // be lost even if the clear write fails (the draft stays recoverable, the
+    const merged = normalizeCurrentSession(currentDoc.value, now())
+    const committed = merged ? entriesFromCurrentSession(merged) : []
+    if (committed.length === 0) {
+      // Nothing ready to commit — leave the draft untouched.
+      return { committed: [], entries: entriesDoc.value }
+    }
+    // COMMIT the ready entries to the append-only log DURABLY (tombstone-honoring
+    // path). entries.json is durable before the draft is cleared, so the workout
+    // cannot be lost even if the clear fails (the draft stays recoverable, the
     // re-commit dedups on the stable ids).
-    const clearResult = await store.set('current_session.json', null)
-    throwIfDisposed() // app switched away while parked on the clear — abort
-    requireDurable(clearResult, 'current_session.json')
-    session = null
-    setSession(null)
+    const nextEntries = await processEntriesWrite({ upsertEntries: committed })
+    throwIfDisposed()
+    // CLEAR the draft only now. A non-durable clear rejects; the draft stays
+    // recoverable and a retry dedups.
+    await currentDoc.set(null)
+    throwIfDisposed()
     return { committed, entries: nextEntries }
   }
 
-  // ── Public intent API. Each method ENQUEUES; the controller processes them
-  // strictly serially. Every method returns a promise the caller can await /
-  // catch, so the React layer can drive retry + signals without ever touching
-  // the in-memory truth directly.
+  // Enqueue work on the cross-file finish chain so a Finish and a draft
+  // transform never interleave their cross-document steps. Per-doc CAS handles
+  // the within-file races; this chain handles the across-file ordering.
+  function enqueue(work) {
+    const run = finishChain.then(() => (disposed ? undefined : work()))
+    finishChain = run.catch(() => {})
+    return run
+  }
+
   return {
-    // Reload current_session.json (mount, subscribe, poll, onEntriesMaybeChanged).
+    // Reload current_session.json (mount, subscribe, poll). A pure refresh.
     load() {
       return enqueue(processLoad).catch((err) => {
         onWriteError(err, 'session_load')
@@ -1784,21 +1765,14 @@ function createSessionController(deps) {
     entriesWrite(intent = {}) {
       return enqueue(() => processEntriesWrite(intent))
     },
-    // Finish: commit the draft to history then clear it, as one serial step.
+    // Finish: stamp → commit → clear, as one serial cross-file step.
     finish() {
       return enqueue(processFinish)
     },
-    // Seed the in-memory truth + React state without a write (boot path: the
-    // initial entries load is read-only and must not go through the writer).
-    setEntriesInitial(entries) {
-      setEntries(entries)
-    },
-    // Read-only accessors for the React layer (e.g. signal payloads). These read
-    // the latest committed truth; they never mutate it.
-    getSession() { return session },
-    hasTombstone(id) { return tombstones.has(id) },
+    // Read-only accessor for the React layer (e.g. signal payloads).
+    getSession() { return currentDoc.value },
     // Dispose: an app switch builds a fresh controller; mark this one inert so a
-    // late-resolving enqueued intent from the old app cannot write into the new.
+    // late-resolving enqueued step from the old app cannot advance after switch.
     dispose() { disposed = true },
   }
 }
@@ -1820,8 +1794,33 @@ export {
   recentExercises,
   sportIconKey,
   sportIconColor,
+  makeEntriesDocConfig,
+  makeCurrentSessionDocConfig,
+  docItemIdentity,
+  createSessionController,
+  reconcileDraftIds,
+  currentSessionNeedsIdAssignment,
+  stableHash,
 }
 // ===== INLINE-LOGIC END =====
+
+// Bind useDocument ONCE to the app's own React, lazily, from the mobius runtime
+// factory (window.mobius.createUseDocument(React)). The runtime is React-free
+// and headless-testable, so the factory must be handed the React the app
+// already imports — a self-binding window.mobius.useDocument would have no React
+// to call hooks on. Lazy + memoized so importing this module for the pure-logic
+// tests (no window.mobius) never throws; the error only fires if a render
+// actually reaches useDocument without the runtime present.
+let _useDocument = null
+function getUseDocument() {
+  if (_useDocument) return _useDocument
+  const factory = (typeof window !== 'undefined') ? window.mobius?.createUseDocument : null
+  if (typeof factory !== 'function') {
+    throw new Error('useDocument needs the mobius runtime — window.mobius.createUseDocument(React) is unavailable')
+  }
+  _useDocument = factory(React)
+  return _useDocument
+}
 
 const CHAT_HEIGHT_CACHE_VERSION = 1
 
@@ -2131,11 +2130,6 @@ function isDurableSetResult(result) {
     result.ok !== false &&
     (result.synced === true || result.queued === true)
   )
-}
-
-function requireDurableSetResult(result, path) {
-  if (isDurableSetResult(result)) return result
-  throw Object.assign(new Error(`${path} was not saved durably`), { result, path })
 }
 
 // ---------------------------------------------------------------------------
@@ -4160,19 +4154,61 @@ function AllTab({ entries, onDelete, onEdit }) {
 export default function App({ appId, token }) {
   const store = useMemo(() => makeStore(appId, token), [appId, token])
   const [tab, setTab] = useState('session')
-  const [entries, setEntries] = useState(null)
-  // The in-memory current_session truth lives in the controller (below); this
-  // React state is its mirror, updated only through the controller's setSession.
-  const [currentSession, setCurrentSession] = useState(null)
   const [bootStatus, setBootStatus] = useState('loading')
   const syncStatus = useSyncStatus(store)
   const bumpSync = syncStatus.bump
-  // Entries state setter, supporting the functional-update form a couple of call
-  // sites use (the transient-empty-read guard). Defined before the controller so
-  // the controller's setEntries can reference it.
-  const setEntriesState = useCallback((next) => {
-    setEntries((prev) => (typeof next === 'function' ? next(prev) : next))
-  }, [])
+
+  // ── The two source-of-truth documents, each a useDocument handle (the mobius
+  // runtime's serialized read-merge-write under If-Match/412 CAS). They REPLACE
+  // the two bespoke serialized-write engines this app used to ship: the docs ARE
+  // the React state (doc.value), and their update(fn) is the durable writer.
+  //
+  // The PROVEN merge/identity semantics are passed UNCHANGED as params, so the
+  // data-loss guarantees are byte-identical to the hand-rolled engines:
+  //   - entries.json: identity = the stable entry id; merge = mergeEntriesForSave
+  //     with the WHOLE accumulated tombstone set (closed over below), so every
+  //     write — local or a CAS reread-remerge — censors a deleted id against the
+  //     fresh remote (the absorbing barrier).
+  //   - current_session.json: a single object (not an array), so its merge is
+  //     mergeCurrentSessions after reconcileDraftIds maps an id-less co-writer
+  //     rewrite onto the in-memory ids by CONTENT signature — the id-churn that
+  //     once duplicated workouts, now owned by the doc's reconciliation.
+  // mode:'cas' is what CLOSES the cross-context finish-vs-agent residual: a
+  // concurrent embedded-agent append the writer never saw is preserved through
+  // the 412 reread-remerge loop, not lost to a whole-file last-write-wins.
+  const useDocument = useMemo(() => getUseDocument(), [])
+
+  // Absorbing-barrier tombstone set for entries.json: a deleted id never
+  // resurrects. Closed over by the entries doc's merge so EVERY entries write
+  // re-applies the WHOLE set against the fresh remote. A ref (not state): the
+  // merge reads it synchronously inside update(); it must not need a re-render.
+  const tombstonesRef = useRef(null)
+  if (tombstonesRef.current === null) tombstonesRef.current = new Set()
+  const tombstones = tombstonesRef.current
+
+  // The doc configs are the PROVEN merge/identity semantics, packaged as pure
+  // factories in logic.js (so index.jsx and the concurrency tests drive the SAME
+  // params). The entries config reads the tombstone set FRESH on every merge, so
+  // a CAS reread-remerge re-applies the whole absorbing barrier.
+  const entriesConfig = useMemo(() => makeEntriesDocConfig(() => [...tombstones]), [tombstones])
+  const currentConfig = useMemo(() => makeCurrentSessionDocConfig(), [])
+  const entriesDoc = useDocument('entries.json', entriesConfig)
+  const currentDoc = useDocument('current_session.json', currentConfig)
+
+  // React-facing aliases: the docs ARE the state. A null/empty doc value before
+  // the first load reads as the old loading sentinel.
+  const entries = entriesDoc.status === 'loading' ? null : entriesDoc.value
+  const currentSession = currentDoc.value
+
+  // Feed the SyncPill from the docs' write status (durable resolve clears the
+  // error; a rejected DurableWriteError sets it). Mirrors the old bumpSync(result).
+  useEffect(() => {
+    bumpSync(currentDoc.lastError ? { error: true } : { synced: true })
+  }, [currentDoc.status, currentDoc.lastError])
+  useEffect(() => {
+    bumpSync(entriesDoc.lastError ? { error: true } : { synced: true })
+  }, [entriesDoc.status, entriesDoc.lastError])
+
   // Retry hook for the SyncPill: the last failed intent re-enqueued on tap.
   const retryActionRef = useRef(null)
   // Re-entrancy guard for the Finish button only (so a double-tap can't enqueue
@@ -4180,39 +4216,26 @@ export default function App({ appId, token }) {
   // button also drives a spinner + one-shot signals, so we gate the gesture.
   const finishInFlightRef = useRef(false)
 
-  // ── THE single serialized session-state controller (see
-  // createSessionController in logic.js). One instance per app instance — keyed
-  // by `store`, which is memoized on [appId, token], so an app switch builds a
-  // FRESH controller (own chain, own in-memory truth, own tombstones) and the
-  // old one is disposed; a late-resolving load from the previous app can never
-  // write into the new one. EVERY session-state trigger (mount-load, subscribe,
-  // poll, onEntriesMaybeChanged, quick-add, edit, delete, finish, retry) routes
-  // through this controller's intent API, and the controller processes intents
-  // STRICTLY SERIALLY. The bumpSync result-reporting is wired through a durable
-  // check that also feeds the SyncPill.
+  // ── The thin cross-FILE orchestrator (createSessionController in logic.js).
+  // It no longer owns a write engine — each doc.update is the durable CAS writer.
+  // Its remaining job is the part useDocument cannot: the cross-file Finish
+  // transition (stamp → commit entries → clear draft) as ONE indivisible
+  // sequence, and the tombstone barrier the entries merge enforces. One instance
+  // per app instance (keyed by the docs), disposed on app switch so a
+  // late-resolving step from the old app can't advance into the new one.
   const controller = useMemo(() => createSessionController({
-    store,
-    // The controller owns the in-memory truth; React state mirrors it. These
-    // setters are the ONLY way session/entries state changes after boot.
-    setSession: (next) => setCurrentSession(next),
-    setEntries: (next) => setEntriesState(next),
-    // Every write result is reported to the SyncPill, then asserted durable. A
-    // non-durable result throws here, which keeps the controller from advancing
-    // its in-memory truth past a write it could not land.
-    requireDurable: (result, path) => {
-      bumpSync(result)
-      return requireDurableSetResult(result, path)
-    },
+    entriesDoc,
+    currentDoc,
+    addTombstones: (ids) => { for (const id of ids || []) if (id) tombstones.add(id) },
     onWriteError: (err, source) => {
       // eslint-disable-next-line no-console
       console.error(`${source} failed`, err)
-      bumpSync({ synced: false, error: true })
+      bumpSync({ error: true })
       window.mobius?.signal?.('error', { message: err?.message || `${source} failed`, source })
     },
-    signal: (...args) => window.mobius?.signal?.(...args),
-  }), [store, bumpSync])
+  }), [entriesDoc, currentDoc, tombstones, bumpSync])
   // Dispose the previous controller on app switch / unmount so a stale enqueued
-  // intent from it can't write into the new app's store.
+  // step from it can't advance into the new app.
   useEffect(() => () => controller.dispose(), [controller])
 
   const [finishing, setFinishing] = useState(false)
@@ -4251,11 +4274,16 @@ export default function App({ appId, token }) {
   }, [appId, chatHeight])
 
   const loadEntries = useCallback(async (options = {}) => {
-    const loaded = await store.get('entries.json')
+    // entries.json is the entries doc — refresh() re-reads the fresh remote and
+    // reconciles it into entriesDoc.value (the React state). The doc's identity
+    // (entry id) keeps stable ids across reads; its merge applies the tombstone
+    // barrier, so a refresh never resurrects a just-deleted row.
+    const loaded = await entriesDoc.refresh().catch(() => entriesDoc.value)
     const normalizedLoaded = normalizeStoredEntries(loaded)
     if (normalizedLoaded.length > 0) {
-      setEntriesState(normalizedLoaded)
       if (options.setReady) setBootStatus('ready')
+      // Persist a normalization-rewrite (a legacy/odd-shaped file) through the
+      // durable writer so the canonical form lands on disk.
       if (Array.isArray(loaded) && JSON.stringify(loaded) !== JSON.stringify(normalizedLoaded)) {
         enqueueEntriesWrite({ upsertEntries: normalizedLoaded })
       }
@@ -4265,34 +4293,28 @@ export default function App({ appId, token }) {
       const legacy = await store.get('state.json')
       if (legacy && Array.isArray(legacy.history) && legacy.history.length > 0) {
         const migrated = normalizeStoredEntries(migrateLegacyState(legacy))
-        setEntriesState(migrated)
         if (options.setReady) setBootStatus('ready')
+        // Commit the migrated history through the durable writer (sets the doc).
         enqueueEntriesWrite({ upsertEntries: migrated })
         return migrated
       }
     }
-    // A transient empty read (offline cache miss, a network blip, a half-written
-    // file) is indistinguishable from a genuinely-empty store. On the post-chat
-    // REFRESH path (no setReady) we already have a loaded list, so keep it rather
-    // than blanking the whole log on a momentary empty read. Only the initial
-    // boot (setReady) renders the real empty state.
-    if (!options.setReady) {
-      setEntriesState((prev) => (Array.isArray(prev) && prev.length > 0 ? prev : []))
-      return []
-    }
-    setEntriesState([])
-    setBootStatus('ready')
-    return []
-  }, [enqueueEntriesWrite, setEntriesState, store])
+    // A transient empty read is indistinguishable from a genuinely-empty store.
+    // Only the initial boot (setReady) renders the real empty state; the doc's
+    // optimistic value already preserves a non-empty list on a momentary empty
+    // refresh (refresh keeps valueRef when the server read is null).
+    if (options.setReady) setBootStatus('ready')
+    return normalizeStoredEntries(entriesDoc.value)
+  }, [enqueueEntriesWrite, entriesDoc, store])
 
   // Reload current_session.json through the controller. Every reload trigger —
   // initial mount, the subscribe callback, the poller tick, and
-  // onEntriesMaybeChanged — calls THIS, which enqueues a `load` intent. The
-  // controller re-reads fresh, merges against its in-memory truth, id-stamps an
-  // id-less draft (persisting it back in the SAME serial step so a re-read is
-  // idempotent), and updates React state. Because the load runs on the same
-  // chain as finish/quick-add, it can never observe a half-finished transition
-  // nor write a stale draft back after finish cleared it.
+  // onEntriesMaybeChanged — calls THIS, which enqueues a pure-read `load`. The
+  // controller refreshes currentDoc: it re-reads the fresh remote and reconciles
+  // id-less entries against the optimistic value (the doc's identity), writing
+  // NOTHING — so a concurrent agent append is never clobbered (the P0 property).
+  // Because load runs on the controller's cross-file chain, it can never observe
+  // a half-finished Finish transition.
   const loadCurrentSession = useCallback(() => controller.load(), [controller])
 
   // Initial load. entries.json is the append-only log. If it's missing but a
@@ -4337,18 +4359,20 @@ export default function App({ appId, token }) {
     return createVisiblePoller(() => controller.load(), { doc: document, win: window })
   }, [controller])
 
-  // Append-only write: optimistic local update + serialized write-through. The
-  // controller's entriesWrite re-reads fresh + applies the whole tombstone set
-  // at process time, then setEntries the authoritative merge, superseding this
-  // optimistic value. On failure it re-throws; the caller wires the retry.
+  // Append-only write through the durable CAS writer. entriesWrite folds the
+  // deletions into the tombstone barrier and runs entriesDoc.update, which sets
+  // the optimistic value (read-your-writes), merges the fresh remote on stable
+  // id under CAS, and resolves durable / rejects on a non-durable write. On
+  // failure it re-throws; the caller wires the retry. (nextEntries is ignored —
+  // the doc derives the authoritative value from the upserts + fresh remote +
+  // tombstones, so no separate optimistic setState is needed.)
   const persist = useCallback((nextEntries, options = {}) => {
-    setEntriesState(nextEntries)
     const intent = { upsertEntries: options.upsertEntries || [], deletedIds: options.deletedIds || [] }
     enqueueEntriesWrite(intent).catch((err) => {
       retryActionRef.current = () => enqueueEntriesWrite(intent)
       window.mobius?.signal?.('error', { message: err?.message || 'entries save failed', source: 'save' })
     })
-  }, [enqueueEntriesWrite, setEntriesState])
+  }, [enqueueEntriesWrite])
 
   const closeNestedNav = useCallback(() => {
     try { navHandleRef.current?.close?.() } catch {}

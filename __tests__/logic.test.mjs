@@ -20,7 +20,9 @@ import {
   lastEntryForExercise, recentExercises,
   sportIconKey, sportIconColor, SPORT_ICON_RULES, SPORT_ICON_COLORS, CATEGORIES,
   createVisiblePoller, createSessionController,
+  makeEntriesDocConfig, makeCurrentSessionDocConfig, reconcileDraftIds,
 } from '../logic.js'
+import { makeCasStore, renderDoc } from '../tests/casHarness.mjs'
 import { buildEntry } from '../build-entry.mjs'
 
 // --- robustness against bad/odd LLM output (Codex review hardening) ---
@@ -769,95 +771,65 @@ function rawDraft(entries) {
   }
 }
 
-function makeGatedSessionStore(initialSession) {
-  const files = {
-    'current_session.json': cloneJson(initialSession),
-    'entries.json': [],
-  }
-  const readParked = deferred()
-  const releaseRead = deferred()
-  const writeParked = deferred()
-  const releaseWrite = deferred()
-  let gateLoadRead = true
-  let gateAgentWrite = true
-  const clientSets = []
-
-  return {
-    clientSets,
-    async get(path) {
-      const snapshot = cloneJson(files[path])
-      if (path === 'current_session.json' && gateLoadRead) {
-        gateLoadRead = false
-        readParked.resolve(snapshot)
-        await releaseRead.promise
-      }
-      return snapshot
-    },
-    async set(path, value, actor = 'client') {
-      if (path === 'current_session.json' && actor === 'agent' && gateAgentWrite) {
-        gateAgentWrite = false
-        writeParked.resolve(cloneJson(value))
-        await releaseWrite.promise
-      }
-      if (actor === 'client') clientSets.push({ path, value: cloneJson(value) })
-      files[path] = cloneJson(value)
-      return { synced: true }
-    },
-    async agentAppend(entry) {
-      const current = cloneJson(files['current_session.json'])
-      const next = rawDraft([...(current?.entries || []), entry])
-      return this.set('current_session.json', next, 'agent')
-    },
-    waitForLoadReadParked: () => readParked.promise,
-    waitForAgentWriteParked: () => writeParked.promise,
-    releaseLoadRead: () => releaseRead.resolve(),
-    releaseAgentWrite: () => releaseWrite.resolve(),
-    snapshot: (path) => cloneJson(files[path]),
-  }
-}
-
-test('load-time id reconciliation is read-only and does not clobber a concurrent agent append', async () => {
-  const store = makeGatedSessionStore(rawDraft([
-    rawDraftEntry({ ts: base, activity: 'Squat' }), // id-less legacy/agent draft
-  ]))
-  const sessions = []
+// Wire the TWO useDocument docs + the real controller against the CAS harness
+// — the same wiring index.jsx's App() uses, so the P0 test runs the installed
+// data path (the runtime hook + the shipped merge/identity configs).
+function wireSessionDocs(store, now = () => base) {
+  const tombstones = new Set()
+  const entriesDoc = renderDoc(store, 'entries.json', makeEntriesDocConfig(() => [...tombstones]))
+  const currentDoc = renderDoc(store, 'current_session.json', makeCurrentSessionDocConfig())
   const controller = createSessionController({
-    store,
-    setSession: (next) => { sessions.push(next) },
-    setEntries: () => {},
-    requireDurable: (result) => result,
-    now: () => base,
+    entriesDoc,
+    currentDoc,
+    addTombstones: (ids) => { for (const id of ids || []) if (id) tombstones.add(id) },
+    now,
   })
+  return { controller, entriesDoc, currentDoc }
+}
+const settle = async (rounds = 6) => { for (let i = 0; i < rounds; i += 1) await new Promise((r) => setTimeout(r, 0)) }
 
-  const loadPromise = controller.load()
-  await store.waitForLoadReadParked()
+test('load is a pure read and does not clobber a concurrent agent append (P0, useDocument/CAS)', async () => {
+  // An id-LESS draft on disk (a legacy/agent write that omitted ids). A load is
+  // currentDoc.refresh() — a PURE read: it issues ZERO current_session.json
+  // writes, so a cross-context agent append landing concurrently is NOT
+  // overwritten. fail-on-revert: a load that wrote its stale snapshot back would
+  // drop the append (and clientWrites would be > 0).
+  const store = makeCasStore({
+    'current_session.json': rawDraft([rawDraftEntry({ ts: base, activity: 'Squat' })]),
+    'entries.json': [],
+  })
+  const { controller, currentDoc } = wireSessionDocs(store)
+  await settle()
 
-  const agentWrite = store.agentAppend(rawDraftEntry({
-    id: 'agent-run',
-    ts: base + 1000,
-    category: 'running',
-    activity: 'Run',
-    metrics: { duration_s: 1500, distance_m: 5000, elevation_m: null, location: null },
-  }))
-  await store.waitForAgentWriteParked()
-  store.releaseAgentWrite()
-  await agentWrite
-  assert.deepEqual(
-    store.snapshot('current_session.json').entries.map((entry) => entry.activity),
-    ['Squat', 'Run'],
-    'agent append must land while the load is still holding a stale read snapshot',
-  )
+  const writesBefore = store.log.filter((e) => e.op === 'set' && e.path === 'current_session.json').length
 
-  store.releaseLoadRead()
-  await loadPromise
+  // A cross-context agent appends Run (bumps the version) — exactly the append
+  // the P0 property must preserve.
+  const cur = store.serverValue('current_session.json')
+  store.agentWrite('current_session.json', rawDraft([
+    ...cur.entries,
+    rawDraftEntry({
+      id: 'agent-run', ts: base + 1000, category: 'running', activity: 'Run',
+      metrics: { duration_s: 1500, distance_m: 5000, elevation_m: null, location: null },
+    }),
+  ]))
 
-  const disk = store.snapshot('current_session.json')
-  assert.deepEqual(disk.entries.map((entry) => entry.activity), ['Squat', 'Run'])
-  assert.equal(store.clientSets.length, 0, 'load must not write a stamped stale snapshot back to disk')
-  assert.equal(sessions.length, 1)
-  assert.equal(sessions[0].entries.length, 1)
-  assert.ok(sessions[0].entries[0].id, 'load still reconciles an in-memory id for React state')
+  await controller.load()
+  await settle()
+
+  const writesAfter = store.log.filter((e) => e.op === 'set' && e.path === 'current_session.json').length
+  assert.equal(writesAfter, writesBefore, 'P0: load is a pure read — zero current_session.json writes')
+
+  // The concurrent agent append survives on disk and surfaces in React state.
+  const disk = normalizeCurrentSession(store.serverValue('current_session.json'))
+  assert.deepEqual(disk.entries.map((e) => e.activity).sort(), ['Run', 'Squat'],
+    'agent append survives on disk (load did not clobber it)')
+  const inState = normalizeCurrentSession(currentDoc.value)
+  assert.deepEqual(inState.entries.map((e) => e.activity).sort(), ['Run', 'Squat'],
+    'load surfaced BOTH entries in React state (refresh merged ids, did not overwrite)')
+  assert.ok(inState.entries.every((e) => e.id), 'normalized state carries stable ids for React keys')
 })
+
 
 // --- mergeCurrentSessions: reconcile co-writers by entry id ------------------
 
