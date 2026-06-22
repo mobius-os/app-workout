@@ -2772,7 +2772,7 @@ function SyncPill({ status, onRetry }) {
   const { pending, online, hasError } = status
   if (hasError) {
     return (
-      <button className="wk-pill is-error" type="button" onClick={onRetry}
+      <button className="wk-pill is-error" type="button" role="alert" onClick={onRetry}
         title="The last save was not confirmed. Retry saving now."
         aria-label="Save failed, retry">
         Save failed · Retry
