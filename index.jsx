@@ -4147,6 +4147,28 @@ function AllTab({ entries, onDelete, onEdit }) {
   )
 }
 
+// useDocument returns a BRAND-NEW handle object on every render (its return is a
+// fresh { value, status, ... } literal). Feeding that ever-changing identity into
+// a dependency array re-runs the memo/effect every render — and for the session
+// controller that means it is RE-CREATED and its cleanup DISPOSES the prior one
+// every render, which aborts the in-flight `load` with "controller disposed" so
+// the session can never settle. This wraps a handle in a STABLE identity whose
+// getters/methods always delegate to the latest render's handle: a dependent
+// keeps one identity for the component's life, yet every read still sees fresh
+// doc state. (Render-time reads keep using the raw handle directly.)
+function useStableDocHandle(doc) {
+  const ref = useRef(doc)
+  ref.current = doc
+  return useMemo(() => ({
+    get value() { return ref.current.value },
+    get status() { return ref.current.status },
+    get lastError() { return ref.current.lastError },
+    update: (fn) => ref.current.update(fn),
+    set: (next) => ref.current.set(next),
+    refresh: () => ref.current.refresh(),
+  }), [])
+}
+
 // ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
@@ -4195,6 +4217,13 @@ export default function App({ appId, token }) {
   const entriesDoc = useDocument('entries.json', entriesConfig)
   const currentDoc = useDocument('current_session.json', currentConfig)
 
+  // Stable identities for the two handles, for any hook whose dependency array
+  // must not churn every render (the session controller and loadEntries below).
+  // useDocument hands back a fresh object each render, so depending on the raw
+  // handle would thrash those hooks; these proxies read through to live state.
+  const entriesDocHandle = useStableDocHandle(entriesDoc)
+  const currentDocHandle = useStableDocHandle(currentDoc)
+
   // React-facing aliases: the docs ARE the state. A null/empty doc value before
   // the first load reads as the old loading sentinel.
   const entries = entriesDoc.status === 'loading' ? null : entriesDoc.value
@@ -4224,8 +4253,8 @@ export default function App({ appId, token }) {
   // per app instance (keyed by the docs), disposed on app switch so a
   // late-resolving step from the old app can't advance into the new one.
   const controller = useMemo(() => createSessionController({
-    entriesDoc,
-    currentDoc,
+    entriesDoc: entriesDocHandle,
+    currentDoc: currentDocHandle,
     addTombstones: (ids) => { for (const id of ids || []) if (id) tombstones.add(id) },
     onWriteError: (err, source) => {
       // eslint-disable-next-line no-console
@@ -4233,7 +4262,7 @@ export default function App({ appId, token }) {
       bumpSync({ error: true })
       window.mobius?.signal?.('error', { message: err?.message || `${source} failed`, source })
     },
-  }), [entriesDoc, currentDoc, tombstones, bumpSync])
+  }), [entriesDocHandle, currentDocHandle, tombstones, bumpSync])
   // Dispose the previous controller on app switch / unmount so a stale enqueued
   // step from it can't advance into the new app.
   useEffect(() => () => controller.dispose(), [controller])
@@ -4278,7 +4307,7 @@ export default function App({ appId, token }) {
     // reconciles it into entriesDoc.value (the React state). The doc's identity
     // (entry id) keeps stable ids across reads; its merge applies the tombstone
     // barrier, so a refresh never resurrects a just-deleted row.
-    const loaded = await entriesDoc.refresh().catch(() => entriesDoc.value)
+    const loaded = await entriesDocHandle.refresh().catch(() => entriesDocHandle.value)
     const normalizedLoaded = normalizeStoredEntries(loaded)
     if (normalizedLoaded.length > 0) {
       if (options.setReady) setBootStatus('ready')
@@ -4304,8 +4333,8 @@ export default function App({ appId, token }) {
     // optimistic value already preserves a non-empty list on a momentary empty
     // refresh (refresh keeps valueRef when the server read is null).
     if (options.setReady) setBootStatus('ready')
-    return normalizeStoredEntries(entriesDoc.value)
-  }, [enqueueEntriesWrite, entriesDoc, store])
+    return normalizeStoredEntries(entriesDocHandle.value)
+  }, [enqueueEntriesWrite, entriesDocHandle, store])
 
   // Reload current_session.json through the controller. Every reload trigger —
   // initial mount, the subscribe callback, the poller tick, and
