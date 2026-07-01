@@ -66,29 +66,54 @@ export function categoryFamily(category) {
 // ---------------------------------------------------------------------------
 
 export const SPORT_ICON_RULES = [
+  // A dumbbell day reads differently from a barbell day, so pure dumbbell work
+  // gets its own glyph. Checked BEFORE the generic barbell block so "Dumbbell
+  // Press" / "Bicep Curl" resolve here. NOTE: kettlebell stays on the barbell
+  // rule below — the app has always drawn it with the barbell and a test pins
+  // that — so it is deliberately absent here.
+  { icon: 'dumbbell', words: [
+    'dumbbell', 'db', 'bicep', 'biceps', 'tricep', 'triceps',
+  ] },
   { icon: 'barbell', family: 'strength', words: ['row'] },
   { icon: 'barbell', words: [
     'bench', 'press', 'squat', 'deadlift', 'rdl', 'ohp', 'curl', 'barbell',
-    'dumbbell', 'kettlebell', 'snatch', 'clean', 'jerk', 'thruster', 'lunge',
-    'pull', 'pullup', 'chinup', 'pulldown', 'push', 'pushup', 'pushdown',
-    'dip', 'shrug', 'raise', 'extension', 'fly', 'flye', 'plank', 'crunch',
-    'situp', 'lift', 'weights', 'hypertrophy',
+    'kettlebell', 'kb', 'goblet', 'farmer', 'farmers',
+    'snatch', 'clean', 'jerk', 'thruster', 'lunge', 'lunges', 'legpress',
+    'leg press', 'legs', 'calf', 'calves', 'hinge', 'hip thrust', 'glute',
+    'hamstring', 'quad', 'pull', 'pullup', 'chinup', 'chin up', 'pull up',
+    'pulldown', 'lat', 'lats', 'push', 'pushup', 'push up', 'pushdown',
+    'dip', 'dips', 'shrug', 'raise', 'extension', 'fly', 'flye', 'plank',
+    'core', 'abs', 'ab', 'crunch', 'situp', 'sit up', 'lift', 'weights',
+    'hypertrophy', 'machine', 'cable', 'smith',
   ] },
-  { icon: 'run', words: ['run', 'running', 'jog', 'jogging', 'sprint', 'marathon', 'parkrun', 'track'] },
+  { icon: 'run', words: ['run', 'running', 'jog', 'jogging', 'sprint', 'sprints', 'marathon', 'parkrun', 'track'] },
   { icon: 'bike', words: ['bike', 'biking', 'cycling', 'cycle', 'ride', 'riding', 'spin', 'spinning', 'mtb', 'peloton', 'velodrome'] },
   { icon: 'swimming', words: ['swim', 'swimming', 'freestyle', 'breaststroke', 'backstroke', 'butterfly', 'pool', 'laps'] },
   { icon: 'kayak', words: ['rowing', 'row', 'erg', 'ergometer', 'kayak', 'canoe', 'paddle', 'paddling', 'sup'] },
+  { icon: 'surf', words: ['surf', 'surfing', 'bodyboard', 'windsurf', 'kitesurf', 'wakeboard'] },
   { icon: 'mountain', words: ['climb', 'climbing', 'boulder', 'bouldering', 'crag', 'belay', 'mountaineering'] },
   { icon: 'trekking', words: ['hike', 'hiking', 'trek', 'trekking', 'ruck', 'rucking', 'trail'] },
+  { icon: 'ski', words: ['ski', 'skiing', 'crosscountry', 'nordic', 'telemark'] },
+  { icon: 'snowboard', words: ['snowboard', 'snowboarding', 'boarding'] },
+  { icon: 'ice-skate', words: ['skate', 'skating', 'iceskating', 'rollerblade', 'roller', 'inline'] },
+  { icon: 'skateboard', words: ['skateboard', 'skateboarding', 'longboard'] },
   { icon: 'walk', words: ['walk', 'walking', 'stroll', 'steps'] },
+  { icon: 'dance', words: ['dance', 'dancing', 'zumba', 'ballet', 'barre', 'aerobics'] },
   { icon: 'yoga', words: ['yoga', 'pilates', 'meditation', 'vinyasa', 'hatha', 'breathwork'] },
   { icon: 'stretching', words: ['stretch', 'stretching', 'mobility', 'foam', 'warmup', 'cooldown'] },
+  // jump-rope BEFORE jump: "Jump rope" / "Jump-rope intervals" tokenize to
+  // include the bare word 'jump', so the more specific rope rule must win first.
   { icon: 'jump-rope', words: ['skipping', 'jump rope', 'jumprope', 'double unders'] },
+  { icon: 'jump', words: ['jump', 'jumps', 'plyo', 'plyometric', 'box jump', 'burpee', 'burpees', 'hop'] },
   { icon: 'karate', words: ['boxing', 'kickboxing', 'mma', 'karate', 'judo', 'bjj', 'jiu', 'taekwondo', 'muay', 'sparring', 'martial', 'wrestling'] },
   { icon: 'ball-basketball', words: ['basketball', 'hoops', 'netball'] },
   { icon: 'ball-tennis', words: ['tennis', 'padel', 'squash', 'badminton', 'pickleball', 'racquetball'] },
-  { icon: 'ball-football', words: ['football', 'soccer', 'futsal', 'rugby', 'volleyball', 'handball', 'hockey', 'golf', 'cricket', 'baseball'] },
-  { icon: 'treadmill', words: ['treadmill', 'elliptical', 'stairmaster', 'stepmill', 'stairs'] },
+  { icon: 'ball-volleyball', words: ['volleyball', 'beach volley'] },
+  { icon: 'ball-baseball', words: ['baseball', 'softball', 'tball', 't ball'] },
+  { icon: 'golf', words: ['golf', 'golfing', 'driving range', 'putt', 'putting'] },
+  { icon: 'ball-football', words: ['football', 'soccer', 'futsal', 'rugby', 'handball', 'hockey', 'cricket', 'lacrosse', 'gaelic'] },
+  { icon: 'stairs', words: ['stairmaster', 'stepmill', 'stairs', 'stair', 'stepper', 'stepping'] },
+  { icon: 'treadmill', words: ['treadmill', 'elliptical', 'crosstrainer', 'cross trainer'] },
   { icon: 'heartbeat', words: ['hiit', 'cardio', 'conditioning', 'circuit', 'metcon', 'intervals', 'tabata', 'crossfit', 'wod'] },
 ]
 
@@ -113,7 +138,19 @@ export const SPORT_ICON_COLORS = {
   'ball-football': '#ec4899',
   'ball-basketball': '#ea580c',
   'ball-tennis': '#a3e635',
+  'ball-volleyball': '#fbbf24',
+  'ball-baseball': '#f472b6',
   treadmill: '#f87171',
+  stairs: '#fb923c',
+  dumbbell: '#818cf8',
+  jump: '#22d3ee',
+  dance: '#e879f9',
+  golf: '#4ade80',
+  ski: '#38bdf8',
+  snowboard: '#60a5fa',
+  'ice-skate': '#5eead4',
+  skateboard: '#facc15',
+  surf: '#2dd4bf',
   sparkles: '#a1a1aa',
 }
 

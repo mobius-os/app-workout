@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { workoutAgentPrompt } from '../agent-prompt.js'
 
-export function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, height, quickActions }) {
+// The bottom pane of the toggle-split chat (ported from app-latex's ChatPanel).
+// It FILLS the height its parent split allots via --chat-ratio: the section is a
+// flex column (flex:1 + min-height:0 in the theme), the embed fills it, and the
+// iframe fills the embed — so the chat's composer is pinned to the pane's bottom
+// and the panel is never clipped. No `height` prop: the parent owns the sizing.
+export function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, quickActions }) {
   const mountRef = useRef(null)
   const [error, setError] = useState(null)
   const onEntriesRef = useRef(onEntriesMaybeChanged)
@@ -48,7 +53,7 @@ export function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, hei
   }, [systemPrompt])
 
   return (
-    <section className="workout-chat-panel wk-chat-panel" style={{ flex: `0 0 ${height}%` }}>
+    <section className="wk-chat-panel" aria-label="Agent chat">
       {error && <div className="wk-chat-error">{error}</div>}
       <div className="wk-chat-embed" ref={mountRef} />
     </section>

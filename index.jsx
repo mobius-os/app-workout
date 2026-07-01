@@ -9,8 +9,8 @@ import React, {
 import { CSS } from './theme.js'
 import { makeStore } from './storage.js'
 import {
-  CHAT_MAX_PCT, CHAT_MIN_PCT, CHAT_MIN_PX,
-  chatHeightKey, clampChatPct, readChatHeight,
+  CHAT_PANE_MIN_PX,
+  chatOpenKey, chatRatioKey, clampChatRatio, readChatOpen, readChatRatio,
 } from './constants.js'
 import { draftFromStoredEntry } from './format.js'
 import {
@@ -21,6 +21,7 @@ import {
   normalizeStoredEntries, strengthPRs,
 } from './logic.js'
 import { SportIcon } from './ui/SportIcon.jsx'
+import { ChatBubbleIcon } from './ui/Icons.jsx'
 import { useSyncStatus, SyncPill } from './ui/SyncPill.jsx'
 import { ConfirmModal } from './ui/ConfirmModal.jsx'
 import { ConfirmCard } from './ui/ConfirmCard.jsx'
@@ -169,7 +170,11 @@ export default function App({ appId, token }) {
   const [sessionSaved, setSessionSaved] = useState(false)
   const sessionSavedTimerRef = useRef(null)
   const bodyRef = useRef(null)
-  const [chatHeight, setChatHeight] = useState(() => readChatHeight(appId))
+  // Chat is HIDDEN by default; the header toggle opens it as the bottom pane of
+  // a draggable split (ported from app-latex). chatRatio is the chat pane's
+  // fraction of the body height; both persist per app.
+  const [chatOpen, setChatOpen] = useState(() => readChatOpen(appId))
+  const [chatRatio, setChatRatio] = useState(() => readChatRatio(appId))
 
   const quickActions = useMemo(() => [
     { label: 'Log a workout', prompt: 'Log a workout for me.' },
@@ -196,8 +201,13 @@ export default function App({ appId, token }) {
 
   useEffect(() => {
     if (typeof localStorage === 'undefined') return
-    try { localStorage.setItem(chatHeightKey(appId), String(chatHeight)) } catch {}
-  }, [appId, chatHeight])
+    try { localStorage.setItem(chatOpenKey(appId), String(chatOpen)) } catch {}
+  }, [appId, chatOpen])
+
+  useEffect(() => {
+    if (typeof localStorage === 'undefined') return
+    try { localStorage.setItem(chatRatioKey(appId), String(chatRatio)) } catch {}
+  }, [appId, chatRatio])
 
   const loadEntries = useCallback(async (options = {}) => {
     // entries.json is the entries doc — refresh() re-reads the fresh remote and
@@ -511,58 +521,74 @@ export default function App({ appId, token }) {
     syncStatus.refresh()
   }, [syncStatus])
 
-  const resizeChatBy = useCallback((deltaPct) => {
-    setChatHeight((value) => clampChatPct(value + deltaPct))
+  const toggleChat = useCallback(() => {
+    setChatOpen((open) => {
+      // Turning on always spawns a 50/50 split — the divider in the middle —
+      // regardless of where a previous drag left it.
+      if (!open) setChatRatio(0.5)
+      return !open
+    })
   }, [])
 
   const beginChatResize = useCallback((event) => {
     event.preventDefault()
     const body = bodyRef.current
-    const panel = body?.querySelector?.('.workout-chat-panel')
-    if (!body || !panel) return
+    if (!body) return
     const total = body.getBoundingClientRect().height
     if (!total) return
     const startY = event.clientY
-    const startHeight = panel.getBoundingClientRect().height
-    const minPx = CHAT_MIN_PX
-    const maxPx = Math.max(minPx, total - 110)
-    // The percentage that renders the pixel floor on THIS body height; never
-    // below CHAT_MIN_PCT so the setter stays inside its stored bounds.
-    const minPct = Math.max(CHAT_MIN_PCT, (minPx / total) * 100)
-    const maxPct = Math.min(CHAT_MAX_PCT, (maxPx / total) * 100)
-
+    const startRatioPx = total * chatRatio
+    const divider = event.currentTarget
+    const pointerId = event.pointerId
+    divider.setPointerCapture?.(pointerId)
     const onMove = (moveEvent) => {
-      const nextPx = Math.min(maxPx, Math.max(minPx, startHeight + startY - moveEvent.clientY))
-      setChatHeight(Math.min(maxPct, Math.max(minPct, (nextPx / total) * 100)))
+      // Px-bounded, not fractional: dragging all the way down collapses the
+      // chat to exactly the composer pill (CHAT_PANE_MIN_PX) and no smaller;
+      // dragging all the way up leaves at least one pill of content visible.
+      const desiredPx = startRatioPx + startY - moveEvent.clientY
+      setChatRatio(clampChatRatio(desiredPx, total, CHAT_PANE_MIN_PX))
     }
-    const onUp = () => {
+    // One teardown for every way the drag can end. pointerup is the normal
+    // case, but an interrupted drag (incoming notification, system gesture
+    // cancel, focus steal) fires pointercancel / lostpointercapture INSTEAD —
+    // without handling those the move listener and the pointer capture leak,
+    // leaving the divider stuck "grabbing" the pointer. releasePointerCapture
+    // throws if the id is no longer captured (e.g. lostpointercapture already
+    // released it), so it's guarded.
+    const endDrag = () => {
       window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      // A touch drag can end with pointercancel (the browser claims the gesture)
-      // instead of pointerup. Without removing on cancel too, the pointermove
-      // listener leaks and keeps resizing the panel on every later touch.
-      window.removeEventListener('pointercancel', onUp)
+      window.removeEventListener('pointerup', endDrag)
+      window.removeEventListener('pointercancel', endDrag)
+      divider.removeEventListener('lostpointercapture', endDrag)
+      try { divider.releasePointerCapture?.(pointerId) } catch {}
     }
     window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
-  }, [])
+    window.addEventListener('pointerup', endDrag)
+    window.addEventListener('pointercancel', endDrag)
+    divider.addEventListener('lostpointercapture', endDrag)
+  }, [chatRatio])
 
   const handleResizeKey = useCallback((event) => {
+    const total = bodyRef.current?.getBoundingClientRect().height || 0
+    if (!total) return
+    // Same px floor as the drag path: Home collapses the chat to exactly the
+    // composer pill, End leaves one pill of content; Arrows step by ~6% but can
+    // never cross either floor (clampChatRatio enforces both ends).
+    const step = total * 0.06
     if (event.key === 'ArrowUp') {
       event.preventDefault()
-      resizeChatBy(4)
+      setChatRatio((r) => clampChatRatio(r * total + step, total, CHAT_PANE_MIN_PX))
     } else if (event.key === 'ArrowDown') {
       event.preventDefault()
-      resizeChatBy(-4)
+      setChatRatio((r) => clampChatRatio(r * total - step, total, CHAT_PANE_MIN_PX))
     } else if (event.key === 'Home') {
       event.preventDefault()
-      setChatHeight(CHAT_MIN_PCT)
+      setChatRatio(clampChatRatio(0, total, CHAT_PANE_MIN_PX))
     } else if (event.key === 'End') {
       event.preventDefault()
-      setChatHeight(CHAT_MAX_PCT)
+      setChatRatio(clampChatRatio(total, total, CHAT_PANE_MIN_PX))
     }
-  }, [resizeChatBy])
+  }, [])
 
   // Open the quick-add ConfirmCard. `ex` is a recentExercises row (has
   // category + activity) or null for a blank new entry. `allEntries` is the
@@ -635,6 +661,12 @@ export default function App({ appId, token }) {
     : tab === 'insights' ? 'See the shape of it.'
     : 'Everything you\'ve logged.'
 
+  // Chat is a session-tab affordance: the split renders only when the toggle is
+  // on, we're on the Session tab, and no full-screen card (edit/quick-add) owns
+  // the body. This single flag gates the header toggle-state, the body's split
+  // class + vars, and the divider/panel.
+  const chatOnSessionTab = chatOpen && tab === 'session' && !editingEntry && !quickAddDraft
+
   return (
     <div className="wk-root">
       <style>{CSS}</style>
@@ -658,7 +690,21 @@ export default function App({ appId, token }) {
           <span className="wk-brand-fallback" style={{ display: 'none' }} aria-hidden="true">·</span>
           <p className="wk-subtitle">{subtitle}</p>
         </div>
-        <SyncPill status={syncStatus} onRetry={retryFailedSave} />
+        <div className="wk-header-actions">
+          <SyncPill status={syncStatus} onRetry={retryFailedSave} />
+          {!editingEntry && !quickAddDraft && tab === 'session' && (
+            <button
+              type="button"
+              className="wk-icon-btn wk-chat-toggle"
+              aria-label={chatOpen ? 'Close chat' : 'Open chat'}
+              aria-pressed={chatOpen}
+              title={chatOpen ? 'Close chat' : 'Open chat'}
+              onClick={toggleChat}
+            >
+              <ChatBubbleIcon size={18} />
+            </button>
+          )}
+        </div>
       </div>
 
       {!editingEntry && !quickAddDraft && (
@@ -678,7 +724,13 @@ export default function App({ appId, token }) {
         </nav>
       )}
 
-      <div ref={bodyRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div
+        ref={bodyRef}
+        className={`wk-body${chatOnSessionTab ? ' wk-body--chat-open' : ''}`}
+        style={chatOnSessionTab
+          ? { '--chat-ratio': chatRatio, '--chat-pane-min': `${CHAT_PANE_MIN_PX}px` }
+          : undefined}
+      >
         <div className="wk-scroll">
           <div className="wk-inner">
             {editingEntry ? (
@@ -750,27 +802,26 @@ export default function App({ appId, token }) {
           </div>
         </div>
 
-        {!editingEntry && !quickAddDraft && tab === 'session' && (
+        {chatOnSessionTab && (
           <>
             <div
-              className="workout-chat-resizer wk-chat-resizer"
+              className="wk-chat-divider"
               role="separator"
               aria-label="Resize workout chat"
               aria-orientation="horizontal"
-              aria-valuemin={CHAT_MIN_PCT}
-              aria-valuemax={CHAT_MAX_PCT}
-              aria-valuenow={Math.round(chatHeight)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(chatRatio * 100)}
               tabIndex={0}
               onPointerDown={beginChatResize}
               onKeyDown={handleResizeKey}
             >
-              <span className="wk-chat-resizer-bar" aria-hidden />
+              <span className="wk-chat-divider-bar" aria-hidden="true" />
             </div>
             <AgentChatPanel
               appId={appId}
               token={token}
               store={store}
-              height={chatHeight}
               quickActions={quickActions}
               onEntriesMaybeChanged={() => {
                 loadEntries({ allowMigration: false })

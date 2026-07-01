@@ -54,6 +54,15 @@ export const CSS = `
   font-weight: 700; line-height: 1;
 }
 .wk-subtitle { margin: 0; font-size: 12px; color: var(--muted); user-select: none; }
+.wk-header-actions { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* Base border so the pressed-state border-color below is visible (the shared
+   .wk-icon-btn is borderless). */
+.wk-chat-toggle { border: 1px solid transparent; }
+.wk-chat-toggle[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
 /* /mobius-ui:Header */
 
 /* mobius-ui:Segmented v1 — keep in sync; library candidate. Diverge below the marker only. */
@@ -88,29 +97,69 @@ export const CSS = `
 .wk-chat-embed iframe { display: block; width: 100%; height: 100%; border: 0; }
 /* /mobius-ui:ChatEmbed */
 
-/* Resizable embedded-chat panel — app-specific drag chrome above the ChatEmbed. */
+/* Toggle-split body (ported from app-latex). The body is a flex column: the
+   scroll content on top, then — only when the chat toggle is on — a draggable
+   divider + the chat pane below. Without the split class it's just the content
+   column (chat hidden). */
+.wk-body {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+/* Chat open: the chat pane takes the --chat-ratio share of the body height,
+   floored at --chat-pane-min (composer pill + divider) so the embed's input is
+   never clipped, and capped at the same floor from the other end so the content
+   never fully eats the chat. The drag/keyboard ratio math already honors these
+   bounds; the CSS floor also covers the persisted/default ratio on a short
+   viewport before any drag. */
+.wk-body--chat-open .wk-scroll {
+  flex: 1 1 auto;
+  min-height: min(var(--chat-pane-min, 74px), 100%);
+}
 .wk-chat-panel {
   flex: 0 0 auto;
-  /* Hard pixel floor = the composer pill; lets the panel collapse to just the
-     input + Send while the analytics above take the rest of the screen. */
-  min-height: 64px;
-  max-height: calc(100% - 110px);
+  height: calc(var(--chat-ratio, 0.5) * 100%);
+  min-height: min(var(--chat-pane-min, 74px), 100%);
+  max-height: calc(100% - var(--chat-pane-min, 74px));
   display: flex; flex-direction: column;
   background: var(--bg);
+  overflow: hidden;
+  overscroll-behavior: contain;
+  /* Bottom-pinned sheet: lift the embedded chat composer above the iPhone
+     home-indicator / Android gesture bar on a full-screen PWA. */
   padding-bottom: env(safe-area-inset-bottom);
 }
-.wk-chat-resizer {
-  flex: 0 0 9px;
+/* The draggable divider ("glider") between content and chat: a slim 10px visual
+   bar; the ::before overlay extends the pointer hit area to ~26px without adding
+   visual weight. z-index keeps the overlay above the adjacent panes so the extra
+   hit area actually receives the pointer. */
+.wk-chat-divider {
+  flex: 0 0 10px;
+  height: 10px;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 5;
   display: flex; align-items: center; justify-content: center;
   cursor: ns-resize;
   background: var(--surface);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   touch-action: none;
+  user-select: none;
 }
-.wk-chat-resizer-bar {
-  width: 44px; height: 3px; border-radius: 999px;
+.wk-chat-divider::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: -8px; bottom: -8px;
+}
+.wk-chat-divider:hover,
+.wk-chat-divider:focus-visible {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.wk-chat-divider:focus-visible { outline-offset: -2px; }
+.wk-chat-divider-bar {
+  width: 44px; height: 4px; border-radius: 999px;
   background: color-mix(in srgb, var(--muted) 65%, transparent);
+  pointer-events: none;
 }
 .wk-chat-error {
   flex: 0 0 auto;

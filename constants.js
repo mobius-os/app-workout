@@ -1,40 +1,49 @@
-// Chat-panel height persistence + clamp constants and helpers. The embedded
-// chat collapses to just its composer pill; chatHeight is stored as a % of the
-// body and clamped on read so a value saved under an older floor/ceiling can't
-// strand the panel. Extracted from index.jsx unchanged (modularization).
+// Chat toggle model — persistence + clamp constants and helpers. Ported from
+// app-latex's toggle-split chat (its exact implementation, keys namespaced
+// `workout:` not `latex:`). The embedded chat is HIDDEN by default; a top-bar
+// toggle brings it down as the bottom pane of a draggable split.
+//   chatOpen:  boolean (panel visible).
+//   chatRatio: 0..1 (the chat pane's fraction of the body height).
+// Both persist in localStorage, versioned so an older stored value can be
+// bumped past a schema change. Extracted from index.jsx (modularization).
 
-export const CHAT_HEIGHT_CACHE_VERSION = 1
+export const CHAT_OPEN_VERSION = 1
+export const CHAT_RATIO_VERSION = 1
 
-// The chat panel collapses to just its composer pill so a logged-by-typing
-// session can hand most of the screen to the analytics above it. chatHeight is
-// stored as a percentage of the body (the panel uses flex-basis %), but the
-// real floor is a pixel quantity: CHAT_MIN_PX is the embed input pill (~48px) +
-// its 8px/8px foot padding — the panel can collapse to just the input + Send.
-// The CSS min-height pins the rendered floor at CHAT_MIN_PX regardless of the
-// stored percentage; the drag handler derives the matching min-percent from the
-// live body height. CHAT_MIN_PCT is only a backstop for the percentage setters
-// that run without a measured container — small enough that on any real screen
-// the CSS pixel floor, not the percentage, is what stops the drag.
-export const CHAT_MIN_PX = 64
-export const CHAT_MIN_PCT = 8
-export const CHAT_MAX_PCT = 82
-export const CHAT_DEFAULT_PCT = 64
+// The chat pane must never collapse smaller than the embedded composer's input
+// pill. The embed runs the real ChatView in an opaque iframe and publishes no
+// composer-height var, so we floor the pane at the standard Möbius composer pill
+// height (~64px) plus the divider (10px). The message list above the pill can
+// collapse to zero; the pill itself always stays fully visible and usable. The
+// same floor caps the OTHER end so the content never fully eats the chat.
+export const CHAT_PILL_MIN_PX = 64
+export const CHAT_DIVIDER_PX = 10
+export const CHAT_PANE_MIN_PX = CHAT_PILL_MIN_PX + CHAT_DIVIDER_PX
 
-export function chatHeightKey(appId) {
-  return `workout:${appId}:chat-height:v${CHAT_HEIGHT_CACHE_VERSION}`
+// Clamp a desired chat-pane height (px) into [pill, total - pill] and return it
+// as a 0..1 ratio of the body. When the body is shorter than two pills, fall
+// back to a 50/50 split so neither pane vanishes. Pure — unit-testable.
+export function clampChatRatio(desiredPx, total, minPx) {
+  if (!(total > 0)) return 0.5
+  const floor = minPx
+  const ceil = total - minPx
+  // Body too short to honor both floors: split evenly rather than clip a pill.
+  if (ceil <= floor) return 0.5
+  const px = Math.max(floor, Math.min(ceil, desiredPx))
+  return px / total
 }
 
-export function clampChatPct(value) {
-  return Math.min(CHAT_MAX_PCT, Math.max(CHAT_MIN_PCT, value))
+export function chatOpenKey(appId) { return `workout:${appId}:chat-open:v${CHAT_OPEN_VERSION}` }
+export function chatRatioKey(appId) { return `workout:${appId}:chat-ratio:v${CHAT_RATIO_VERSION}` }
+
+export function readChatOpen(appId) {
+  if (typeof localStorage === 'undefined') return false
+  return localStorage.getItem(chatOpenKey(appId)) === 'true'
 }
 
-export function readChatHeight(appId) {
-  if (typeof localStorage === 'undefined') return CHAT_DEFAULT_PCT
-  const saved = localStorage.getItem(chatHeightKey(appId))
-  if (saved == null) return CHAT_DEFAULT_PCT
-  const raw = Number(saved)
-  if (!Number.isFinite(raw)) return CHAT_DEFAULT_PCT
-  // Clamp on read: a height saved under the old 44% floor must not strand the
-  // panel above the new minimum, and an over-tall value must not exceed the max.
-  return clampChatPct(raw)
+export function readChatRatio(appId) {
+  if (typeof localStorage === 'undefined') return 0.5
+  const raw = Number(localStorage.getItem(chatRatioKey(appId)))
+  if (!Number.isFinite(raw) || raw <= 0 || raw >= 1) return 0.5
+  return Math.max(0.05, Math.min(0.95, raw))
 }
