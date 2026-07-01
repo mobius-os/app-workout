@@ -23,7 +23,6 @@ import {
   makeEntriesDocConfig, makeCurrentSessionDocConfig, reconcileDraftIds,
 } from '../logic.js'
 import { makeCasStore, renderDoc } from '../tests/casHarness.mjs'
-import { buildEntry } from '../build-entry.mjs'
 
 // --- robustness against bad/odd LLM output (Codex review hardening) ---
 
@@ -455,15 +454,6 @@ test('migrateLegacyState turns history sets into strength entries', () => {
 test('toKg leaves kg untouched, converts lb', () => {
   assert.equal(toKg(100, 'kg'), 100)
   assert.ok(Math.abs(toKg(220.46, 'lb') - 100) < 0.05)
-})
-
-test('index.jsx inlined logic block is in sync with logic.js', () => {
-  // Guard against a forgotten `node build-entry.mjs`: regenerating from the
-  // current logic.js must be a no-op against the committed index.jsx.
-  const indexSource = readFileSync(join(here, '..', 'index.jsx'), 'utf8')
-  const logicSource = readFileSync(join(here, '..', 'logic.js'), 'utf8')
-  const rebuilt = buildEntry(indexSource, logicSource)
-  assert.equal(rebuilt, indexSource, 'index.jsx logic block is stale — run `node build-entry.mjs`')
 })
 
 // --- per-exercise analytics (Hevy-style drill-down) ---
@@ -1084,20 +1074,20 @@ test('normalizeEntry stores the matcher icon, not just the category icon', () =>
   assert.equal(e.icon, 'ball-tennis')
 })
 
-test('every matcher icon has a color and an inline SVG glyph in index.jsx', () => {
+test('every matcher icon has a color and an inline SVG glyph in ui/SportIcon.jsx', () => {
   const ruleIcons = new Set(SPORT_ICON_RULES.map((r) => r.icon))
   const categoryIcons = new Set(Object.values(CATEGORIES).map((c) => c.icon))
-  const indexSource = readFileSync(join(here, '..', 'index.jsx'), 'utf8')
-  const block = indexSource.slice(
-    indexSource.indexOf('const ICONS = {'),
-    indexSource.indexOf('function SportIcon'),
+  const iconSource = readFileSync(join(here, '..', 'ui', 'SportIcon.jsx'), 'utf8')
+  const block = iconSource.slice(
+    iconSource.indexOf('const ICONS = {'),
+    iconSource.indexOf('function SportIcon'),
   )
   const svgKeys = new Set(
     [...block.matchAll(/^  '?([a-z0-9-]+)'?: \($/gm)].map((m) => m[1]),
   )
   for (const icon of [...ruleIcons, ...categoryIcons]) {
     assert.ok(SPORT_ICON_COLORS[icon], `icon "${icon}" is missing from SPORT_ICON_COLORS`)
-    assert.ok(svgKeys.has(icon), `icon "${icon}" has no inline SVG in index.jsx ICONS`)
+    assert.ok(svgKeys.has(icon), `icon "${icon}" has no inline SVG in ui/SportIcon.jsx ICONS`)
   }
 })
 

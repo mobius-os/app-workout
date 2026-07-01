@@ -6,13 +6,16 @@ import { mkdirSync } from 'node:fs'
 const esbuild = '/home/hmzmrzx/projects/mobius/frontend/node_modules/.bin/esbuild'
 const nodePath = '/home/hmzmrzx/projects/mobius/frontend/node_modules'
 mkdirSync(new URL('./.build/', import.meta.url), { recursive: true })
+// Bundle the REAL pure-logic module the installed entry imports via source_files.
+// index.jsx no longer re-exports these functions (they live in logic.js now, the
+// single source of truth); bundling logic.js drives the identical code Mobius
+// ships, with no JSX/React in the graph.
 execFileSync(esbuild, [
   '--bundle',
   '--format=esm',
-  '--jsx=automatic',
   '--platform=node',
-  'index.jsx',
-  '--outfile=tests/.build/index.mjs',
+  'logic.js',
+  '--outfile=tests/.build/logic.mjs',
 ], {
   cwd: new URL('..', import.meta.url),
   env: { ...process.env, NODE_PATH: nodePath },
@@ -25,7 +28,7 @@ const {
   mergeEntriesForSave,
   groupSessions,
   summarizeMetrics,
-} = await import('./.build/index.mjs')
+} = await import('./.build/logic.mjs')
 
 test('normalizeEntry guards timestamps and maps strength metrics to stored SI shape', () => {
   const before = Date.now()

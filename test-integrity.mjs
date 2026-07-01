@@ -27,16 +27,15 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { makeCasStore, renderDoc, DurableWriteError, tick, deferred } from './tests/casHarness.mjs'
 
-// ── Load the REAL inlined logic (incl. createSessionController + doc configs) ──
-const indexSource = await readFile(new URL('./index.jsx', import.meta.url), 'utf8')
-const startMarker = '// ===== INLINE-LOGIC START'
-const endMarker = '// ===== INLINE-LOGIC END ====='
-const startIndex = indexSource.indexOf(startMarker)
-const endIndex = indexSource.indexOf(endMarker)
-assert.notEqual(startIndex, -1, 'index.jsx inline logic start marker exists')
-assert.notEqual(endIndex, -1, 'index.jsx inline logic end marker exists')
-const inlineLogic = indexSource
-  .slice(indexSource.indexOf('\n', startIndex) + 1, endIndex)
+// ── Load the REAL pure logic (incl. createSessionController + doc configs) ──
+// logic.js is now the single source of truth (index.jsx imports it via the
+// source_files module tree; the old build-entry.mjs inline block is retired).
+// Strip the top-level `export` keywords + the trailing `export { ... }` block so
+// the source evaluates as module-local bindings inside `new Function`, and so the
+// structural regexes below match the same declaration text they always did.
+const logicSource = await readFile(new URL('./logic.js', import.meta.url), 'utf8')
+const inlineLogic = logicSource
+  .replace(/^export\s+(function|const|let|class)\b/gm, '$1')
   .replace(/export\s*\{[\s\S]*?\}\s*$/m, '')
 
 const L = new Function(`${inlineLogic}
