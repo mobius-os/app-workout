@@ -386,11 +386,50 @@ export default function App({ appId, token }) {
     }
   }, [controller])
 
+  // In-place edit of a live-session entry's metrics (the worksheet). Rides the
+  // SAME serialized sessionWrite path as delete-draft/quick-add: the transform
+  // receives the freshest merged draft, replaces the matching entry by id with a
+  // re-normalized copy (SI, from the worksheet's display-unit draft) preserving
+  // id/ts/sessionId, and re-normalizes the whole session. No new write path, so
+  // the CAS/merge/tombstone guarantees are untouched — a concurrent agent append
+  // or quick-add still merges in on the same chain. metricsDraft is in the loose
+  // display-unit "parsed" shape (same shape ConfirmCard builds); normalizeEntry
+  // converts it to SI.
+  const editSessionEntry = useCallback(async (entryId, metricsDraft) => {
+    if (!entryId) return
+    try {
+      await controller.sessionWrite((base) => {
+        if (!base) return base
+        const nextEntries = base.entries.map((entry) => {
+          if (entry.id !== entryId) return entry
+          return normalizeEntry(
+            { category: entry.category, activity: entry.activity, metrics: metricsDraft },
+            {
+              id: entry.id,
+              ts: entry.ts,
+              sessionId: entry.sessionId,
+              raw: entry.raw || '',
+              source: entry.source || 'manual',
+              confirmed: entry.confirmed !== false,
+            },
+          )
+        })
+        return normalizeCurrentSession({ ...base, entries: nextEntries }, base.startedAt)
+      })
+      retryActionRef.current = null
+    } catch (err) {
+      retryActionRef.current = () => editSessionEntry(entryId, metricsDraft)
+      window.mobius?.signal?.('error', {
+        message: err?.message || 'current session save failed',
+        source: 'draft_edit',
+      })
+    }
+  }, [controller])
+
   const clearCurrentSession = useCallback(async () => {
     try {
       await controller.sessionWrite(() => null)
       closeNestedNav()
-      setClearSessionPending(false)
       retryActionRef.current = null
     } catch (err) {
       retryActionRef.current = clearCurrentSession
@@ -398,6 +437,11 @@ export default function App({ appId, token }) {
         message: err?.message || 'current session save failed',
         source: 'session_clear',
       })
+    } finally {
+      // Always drop the confirm modal, even on a failed clear, so a rejected
+      // write can't leave the "Clear session?" dialog stuck open. The retry pill
+      // (retryActionRef) is the recovery path on failure, not a wedged modal.
+      setClearSessionPending(false)
     }
   }, [closeNestedNav, controller])
 
@@ -681,6 +725,7 @@ export default function App({ appId, token }) {
                         session={currentSession}
                         onFinish={finishCurrentSession}
                         onDeleteEntry={deleteDraftEntry}
+                        onEditEntry={editSessionEntry}
                         onClear={() => setClearSessionPending(true)}
                         finishing={finishing}
                       />

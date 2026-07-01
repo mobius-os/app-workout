@@ -1198,3 +1198,110 @@ test('createVisiblePoller: interval callback is the tick itself', () => {
   fn(); fn()
   assert.equal(ticks, 3)
 })
+
+// ---------------------------------------------------------------------------
+// Workout-logging redesign (add-form set replication + editable worksheet).
+// The add form emits ONE reps/weight spec replicated into N sets; blank
+// reps/weight are allowed at add time and completed on the live-session
+// worksheet. These tests pin the pure-logic contract the two React layers rely
+// on: normalizeEntry replicates faithfully, an entry with a blank set is
+// sessionEntryMissing, and completing every set flips currentSessionReady true.
+// ---------------------------------------------------------------------------
+
+test('add-form replication: N sets of one spec normalize to N identical stored sets', () => {
+  // ConfirmCard's buildCommitDraft for Sets=3 / Reps=5 / Weight=70kg is a
+  // metrics.sets array of 3 copies of the same {weight,reps,unit}.
+  const draft = {
+    category: 'strength',
+    activity: 'Deadlift',
+    metrics: { sets: Array.from({ length: 3 }, () => ({ weight: 70, reps: 5, unit: 'kg' })) },
+  }
+  const e = normalizeEntry(draft, { ts: 1, source: 'manual' })
+  assert.equal(e.metrics.sets.length, 3)
+  for (const s of e.metrics.sets) {
+    assert.equal(s.weight_kg, 70)
+    assert.equal(s.reps, 5)
+    assert.equal(s.unit, 'kg')
+  }
+  // A complete replicated entry is ready to finish.
+  const session = normalizeCurrentSession({ startedAt: 1_700_000_000_000, entries: [{ ...e, id: 'dl' }] })
+  assert.equal(sessionEntryMissing(session.entries[0]), null)
+  assert.equal(currentSessionReady(session), true)
+})
+
+test('add-form replication carries the lb unit into every replicated set', () => {
+  const draft = {
+    category: 'strength',
+    activity: 'Bench Press',
+    metrics: { sets: Array.from({ length: 2 }, () => ({ weight: 225, reps: 5, unit: 'lb' })) },
+  }
+  const e = normalizeEntry(draft, { ts: 1 })
+  assert.equal(e.metrics.sets.length, 2)
+  // Stored SI; both sets convert 225lb → ~102.06kg and keep unit 'lb' for echo.
+  for (const s of e.metrics.sets) {
+    assert.equal(s.unit, 'lb')
+    assert.equal(s.reps, 5)
+    assert.ok(Math.abs(s.weight_kg - toKg(225, 'lb')) < 0.001)
+  }
+})
+
+test('blank-metric add: a strength entry saved with blank reps/weight is allowed but not finish-ready', () => {
+  // The add form no longer blocks Save on blank reps/weight (Sets=2, no numbers),
+  // so this is the shape that reaches current_session.json.
+  const draft = {
+    category: 'strength',
+    activity: 'Squat',
+    metrics: { sets: Array.from({ length: 2 }, () => ({ weight: '', reps: '', unit: 'kg' })) },
+  }
+  const e = normalizeEntry(draft, { ts: 1, source: 'manual' })
+  assert.equal(e.metrics.sets.length, 2)
+  assert.equal(e.metrics.sets[0].weight_kg, null)
+  assert.equal(e.metrics.sets[0].reps, null)
+
+  const session = normalizeCurrentSession({ startedAt: 1_700_000_000_000, entries: [{ ...e, id: 'sq' }] })
+  // Incomplete: currentSessionReady is false and the reason names the exercise.
+  assert.equal(currentSessionReady(session), false)
+  assert.match(sessionEntryMissing(session.entries[0]), /Squat reps and weight/)
+})
+
+test('worksheet completion: filling reps+weight on a blank entry flips currentSessionReady true', () => {
+  // Start from the blank-metric draft above, sitting in a current session.
+  const blank = normalizeCurrentSession({
+    id: 'session-1',
+    startedAt: 1_700_000_000_000,
+    entries: [{
+      id: 'sq',
+      ts: 1,
+      category: 'strength',
+      activity: 'Squat',
+      metrics: { sets: [{ weight_kg: null, reps: null, unit: 'kg' }, { weight_kg: null, reps: null, unit: 'kg' }] },
+    }],
+  })
+  assert.equal(currentSessionReady(blank), false)
+
+  // editSessionEntry's transform: re-normalize the matching entry from a
+  // completed display-unit draft, preserving id/ts/sessionId, then re-normalize
+  // the session. Here both sets get 5 reps × 80kg.
+  const target = blank.entries[0]
+  const completedEntry = normalizeEntry(
+    {
+      category: target.category,
+      activity: target.activity,
+      metrics: { sets: [{ weight: 80, reps: 5, unit: 'kg' }, { weight: 80, reps: 5, unit: 'kg' }] },
+    },
+    { id: target.id, ts: target.ts, sessionId: target.sessionId, source: 'manual' },
+  )
+  const completed = normalizeCurrentSession(
+    { ...blank, entries: blank.entries.map((en) => (en.id === target.id ? completedEntry : en)) },
+    blank.startedAt,
+  )
+
+  assert.equal(sessionEntryMissing(completed.entries[0]), null)
+  assert.equal(currentSessionReady(completed), true)
+  // The edit preserved the entry's identity (id survives the re-normalize), so a
+  // co-writer merge keyed on id can't duplicate it.
+  assert.equal(completed.entries[0].id, 'sq')
+  assert.equal(completed.entries[0].metrics.sets.length, 2)
+  assert.equal(completed.entries[0].metrics.sets[0].weight_kg, 80)
+  assert.equal(completed.entries[0].metrics.sets[0].reps, 5)
+})

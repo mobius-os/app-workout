@@ -279,6 +279,33 @@ export const CSS = `
 }
 .wk-set-index { font-size: 13px; font-weight: 600; color: var(--muted); }
 
+/* Sets stepper on the add form — [−] [N] [+], min 1. */
+.wk-stepper { display: grid; grid-template-columns: 44px 1fr 44px; gap: 6px; align-items: center; }
+.wk-stepper-input { text-align: center; }
+
+/* Live-session worksheet — the draft card is now an editable grid, not a static
+   summary. A strength row is [# reps × weight unit]; cardio/other rows are
+   labelled fields. Incomplete rows/entries get the danger accent so the owner
+   sees exactly what still blocks Finish. */
+.wk-entry-card.is-draft { align-items: flex-start; }
+.wk-entry-card.is-draft .wk-entry-icon { margin-top: 2px; }
+.wk-entry-card.is-incomplete { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.wk-worksheet { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.wk-worksheet-row {
+  display: grid; grid-template-columns: 20px 1fr 14px 1fr 22px;
+  align-items: center; gap: 6px;
+}
+.wk-worksheet-row.is-incomplete .wk-input {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+.wk-worksheet-x { text-align: center; color: var(--muted); font-size: 13px; font-weight: 700; }
+.wk-worksheet-unit { font-size: 12px; color: var(--muted); font-weight: 600; }
+.wk-worksheet-field { display: grid; grid-template-columns: 78px 1fr; gap: 8px; align-items: center; }
+.wk-worksheet-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.wk-entry-card.is-incomplete .wk-entry-meta.wk-current-session-missing {
+  padding: 0; color: var(--danger); font-weight: 600;
+}
+
 /* Category chips for the confirm card — app-specific (per-category accent inline). */
 .wk-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .wk-chip {

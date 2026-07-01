@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { currentSessionReady, fmtDuration, normalizeCurrentSession, sessionEntryMissing } from '../logic.js'
 import { SessionDraftCard } from './SessionDraftCard.jsx'
 
-export function CurrentSessionPanel({ session, onFinish, onDeleteEntry, onClear, finishing = false }) {
+export function CurrentSessionPanel({ session, onFinish, onDeleteEntry, onEditEntry, onClear, finishing = false }) {
   const normalized = useMemo(() => normalizeCurrentSession(session), [session])
   const entries = normalized?.entries || []
   const ready = currentSessionReady(normalized) && !finishing
@@ -54,7 +54,14 @@ export function CurrentSessionPanel({ session, onFinish, onDeleteEntry, onClear,
       </div>
       {entries.length > 0 ? (
         <div className="wk-current-session-list">
-          {entries.map((entry) => <SessionDraftCard key={entry.id} entry={entry} onDelete={onDeleteEntry} />)}
+          {entries.map((entry) => (
+            <SessionDraftCard
+              key={entry.id}
+              entry={entry}
+              onDelete={onDeleteEntry}
+              onEditEntry={onEditEntry}
+            />
+          ))}
         </div>
       ) : (
         <div className="wk-current-session-empty">Add an activity with Quick add, or tell the chat what you did.</div>

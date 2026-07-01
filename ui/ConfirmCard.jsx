@@ -20,35 +20,45 @@ export function ConfirmCard({
     return `${h}:${m}`
   })
 
-  // Strength sets — editable rows of {weight, reps, unit}, in DISPLAY units.
-  // Seed from draft if it has data; otherwise fall back to the last logged entry
-  // for this exercise (the "same as last time" default that makes repeat sets
-  // one tap: chip → ConfirmCard pre-filled → Save).
-  const [sets, setSets] = useState(() => {
-    const s = draft.metrics?.sets
-    if (Array.isArray(s) && s.length > 0) {
-      return s.map((x) => ({
-        weight: x.weight ?? '',
-        reps: x.reps ?? '',
-        unit: x.unit === 'lb' ? 'lb' : 'kg',
-      }))
+  // Strength — ONE uniform spec: [Sets N] [Reps] [Weight] [unit], in DISPLAY
+  // units. On commit we REPLICATE the single reps/weight into N identical sets.
+  // (The per-row worksheet lives on the live-session card now; the add form is a
+  // fast single-tap entry that seeds from last time.) Blank reps/weight are
+  // allowed — the user fills them in later on the session worksheet.
+  //
+  // Seed order: draft's own first set if present; else the last logged entry's
+  // LAST set (the "same as last time" default — one set, not all of last time's).
+  const seedStrength = () => {
+    const dsets = draft.metrics?.sets
+    if (Array.isArray(dsets) && dsets.length > 0) {
+      const first = dsets[0]
+      return {
+        sets: String(dsets.length),
+        reps: first.reps ?? '',
+        weight: first.weight ?? '',
+        unit: first.unit === 'lb' ? 'lb' : 'kg',
+      }
     }
-    // Fall back to last entry's display-unit sets when the draft is empty.
     if (lastEntry && categoryFamily(lastEntry.category) === 'strength') {
       const prevSets = lastEntry.metrics?.sets || []
       if (prevSets.length > 0) {
-        return prevSets.map((s) => {
-          const unit = s.unit === 'lb' ? 'lb' : 'kg'
-          return {
-            weight: s.weight_kg == null ? '' : String(fromKg(s.weight_kg, unit)),
-            reps: s.reps == null ? '' : String(s.reps),
-            unit,
-          }
-        })
+        const last = prevSets[prevSets.length - 1]
+        const unit = last.unit === 'lb' ? 'lb' : 'kg'
+        return {
+          sets: '1',
+          reps: last.reps == null ? '' : String(last.reps),
+          weight: last.weight_kg == null ? '' : String(fromKg(last.weight_kg, unit)),
+          unit,
+        }
       }
     }
-    return [{ weight: '', reps: '', unit: 'kg' }]
-  })
+    return { sets: '1', reps: '', weight: '', unit: 'kg' }
+  }
+  const seed = seedStrength()
+  const [setCount, setSetCount] = useState(seed.sets)
+  const [reps, setReps] = useState(seed.reps)
+  const [weight, setWeight] = useState(seed.weight)
+  const [strengthUnit, setStrengthUnit] = useState(seed.unit)
   // Cardio/other — display-unit metric fields.
   // When the draft is empty and we have a last entry, seed with its values so
   // the user only needs to confirm rather than retype.
@@ -81,12 +91,15 @@ export function ConfirmCard({
   // while that confirm modal is open.
   const [pendingCategory, setPendingCategory] = useState(null)
 
-  const updateSet = (i, patch) =>
-    setSets((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)))
-  const addSet = () =>
-    setSets((prev) => [...prev, { ...(prev[prev.length - 1] || { weight: '', reps: '', unit: 'kg' }) }])
-  const removeSet = (i) =>
-    setSets((prev) => (prev.length <= 1 ? prev : prev.filter((_, j) => j !== i)))
+  // Sets is an integer ≥ 1. A blank or sub-1 typed value clamps to 1 on the way
+  // into the commit draft; the input itself stays lenient so the user can clear
+  // and retype without the field snapping under them mid-edit.
+  const clampSetCount = (value) => {
+    const n = Math.floor(Number(value))
+    return Number.isFinite(n) && n >= 1 ? n : 1
+  }
+  const stepSetCount = (delta) =>
+    setSetCount((prev) => String(Math.max(1, clampSetCount(prev) + delta)))
   const metricNumber = (value) => {
     if (value === '' || value == null) return null
     const n = Number(value)
@@ -94,13 +107,13 @@ export function ConfirmCard({
   }
 
   const familyHasData = (family) => {
-    if (family === 'strength') return sets.some((s) => s.weight !== '' || s.reps !== '')
+    if (family === 'strength') return weight !== '' || reps !== ''
     if (family === 'cardio') return duration !== '' || distance !== '' || elevation !== '' || location !== ''
     return duration !== '' || location !== '' || note !== ''
   }
   const clearFamilyFields = (family) => {
     if (family === 'strength') {
-      setSets([{ weight: '', reps: '', unit: 'kg' }])
+      setSetCount('1'); setReps(''); setWeight(''); setStrengthUnit('kg')
     } else if (family === 'cardio') {
       setDuration(''); setDistance(''); setElevation(''); setLocation('')
     } else {
@@ -130,7 +143,11 @@ export function ConfirmCard({
   const buildCommitDraft = () => {
     let metrics
     if (fam === 'strength') {
-      metrics = { sets: sets.map((s) => ({ weight: metricNumber(s.weight), reps: metricNumber(s.reps), unit: s.unit })) }
+      // REPLICATE the single spec into N identical sets. Blank reps/weight pass
+      // through as null (allowed — completed later on the session worksheet).
+      const n = clampSetCount(setCount)
+      const one = { weight: metricNumber(weight), reps: metricNumber(reps), unit: strengthUnit }
+      metrics = { sets: Array.from({ length: n }, () => ({ ...one })) }
     } else if (fam === 'cardio') {
       metrics = {}
       if (duration !== '') metrics.duration = { value: metricNumber(duration), unit: durationUnit }
@@ -151,13 +168,22 @@ export function ConfirmCard({
     return Number.isFinite(nextTs) ? nextTs : Date.now()
   }
 
-  const saveBlockedReason = sessionEntryMissing(normalizeEntry(buildCommitDraft(), {
+  // The add form intentionally lets a partial entry through: the owner logs
+  // "3 sets of squats" now and fills reps/weight in later on the live-session
+  // worksheet. So Save is blocked ONLY on a missing activity (a generic category
+  // label is not a real activity name) — never on blank reps/weight, blank
+  // duration, or blank distance. The completeness gate (currentSessionReady +
+  // the "Missing: …" summary) still lives on CurrentSessionPanel, which is where
+  // the entry gets finished.
+  const commitPreview = normalizeEntry(buildCommitDraft(), {
     id: 'confirm-preview',
     ts: commitTs(),
     raw: '',
     source: 'manual',
     confirmed: true,
-  }))
+  })
+  const activityMissing = sessionEntryMissing(commitPreview) === 'activity'
+  const saveBlockedReason = activityMissing ? 'activity' : null
 
   const handleCommit = () => {
     if (saveBlockedReason) return
@@ -236,38 +262,60 @@ export function ConfirmCard({
       <div className="wk-spacer-14" />
       {fam === 'strength' ? (
         <div>
-          <label className="wk-label">Sets</label>
-          {sets.map((s, i) => (
-            <div key={i} className="wk-set-row">
-              <span className="wk-set-index">{i + 1}</span>
-              <input
-                className="wk-input" type="number" inputMode="decimal" value={s.weight}
-                onChange={(e) => updateSet(i, { weight: e.target.value })}
-                aria-label={`Set ${i + 1} weight`} placeholder="kg"
-                enterKeyHint="next"
-              />
-              <input
-                className="wk-input" type="number" inputMode="numeric" value={s.reps}
-                onChange={(e) => updateSet(i, { reps: e.target.value })}
-                aria-label={`Set ${i + 1} reps`} placeholder="reps"
-                enterKeyHint={i === sets.length - 1 ? 'done' : 'next'}
-              />
-              <button
-                className="wk-btn-ghost is-muted wk-min44"
-                onClick={() => removeSet(i)} aria-label={`Remove set ${i + 1}`}
-              >×</button>
+          {/* One uniform spec: N sets of the same reps × weight. Reps/weight may
+              be left blank and completed later on the live-session worksheet. */}
+          <div className="wk-grid-metric">
+            <div>
+              <label className="wk-label">Sets</label>
+              <div className="wk-stepper">
+                <button
+                  type="button" className="wk-btn-ghost is-muted wk-min44"
+                  onClick={() => stepSetCount(-1)} aria-label="Fewer sets"
+                  disabled={clampSetCount(setCount) <= 1}
+                >−</button>
+                <input
+                  className="wk-input wk-stepper-input" type="number" inputMode="numeric"
+                  min="1" value={setCount}
+                  onChange={(e) => setSetCount(e.target.value)}
+                  onBlur={() => setSetCount(String(clampSetCount(setCount)))}
+                  aria-label="Number of sets" enterKeyHint="next"
+                />
+                <button
+                  type="button" className="wk-btn-ghost is-muted wk-min44"
+                  onClick={() => stepSetCount(1)} aria-label="More sets"
+                >+</button>
+              </div>
             </div>
-          ))}
-          <div className="wk-btn-row wk-btn-row-finish">
-            <select
-              value={sets[0]?.unit || 'kg'}
-              onChange={(e) => setSets((prev) => prev.map((s) => ({ ...s, unit: e.target.value })))}
-              className="wk-input is-auto" aria-label="Weight unit"
-            >
-              <option value="kg">kg</option>
-              <option value="lb">lb</option>
-            </select>
-            <button className="wk-btn-ghost" onClick={addSet} aria-label="Add set">+ set</button>
+            <div>
+              <label className="wk-label">Unit</label>
+              <select
+                value={strengthUnit}
+                onChange={(e) => setStrengthUnit(e.target.value)}
+                className="wk-input" aria-label="Weight unit"
+              >
+                <option value="kg">kg</option>
+                <option value="lb">lb</option>
+              </select>
+            </div>
+          </div>
+          <div className="wk-spacer-10" />
+          <div className="wk-grid-metric">
+            <div>
+              <label className="wk-label">Reps</label>
+              <input
+                className="wk-input" type="number" inputMode="numeric" value={reps}
+                onChange={(e) => setReps(e.target.value)}
+                aria-label="Reps per set" placeholder="reps" enterKeyHint="next"
+              />
+            </div>
+            <div>
+              <label className="wk-label">Weight</label>
+              <input
+                className="wk-input" type="number" inputMode="decimal" value={weight}
+                onChange={(e) => setWeight(e.target.value)}
+                aria-label="Weight per set" placeholder={strengthUnit} enterKeyHint="done"
+              />
+            </div>
           </div>
         </div>
       ) : (
