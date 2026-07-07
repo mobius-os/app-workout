@@ -405,14 +405,16 @@ export default function App({ appId, token }) {
   // with the stale draft gone, the append starts a fresh session the UNION merge
   // won't re-combine. Both steps run serially on the controller chain (clear then
   // append), so no other local write interleaves between them.
-  const confirmStaleDraftReplace = useCallback(async () => {
-    const pending = staleDraftPrompt
-    setStaleDraftPrompt(null)
-    if (!pending) return
+  // Clear the stale draft, then log the held entry — as ONE atomic-intent unit.
+  // The retry action re-runs THIS whole sequence, never just the append: if the
+  // clear fails, retrying only the log with skipStaleCheck would append into the
+  // still-present stale draft and re-stamp the entry under the old date (the very
+  // corruption this flow exists to prevent).
+  const clearThenLog = useCallback(async (pending) => {
     try {
       await controller.sessionWrite(() => null)
     } catch (err) {
-      retryActionRef.current = () => commitQuickAdd(pending.draft, pending.ts, { skipStaleCheck: true })
+      retryActionRef.current = () => clearThenLog(pending)
       window.mobius?.signal?.('error', {
         message: err?.message || 'current session save failed',
         source: 'session_clear',
@@ -420,7 +422,14 @@ export default function App({ appId, token }) {
       return
     }
     await commitQuickAdd(pending.draft, pending.ts, { skipStaleCheck: true })
-  }, [staleDraftPrompt, controller, commitQuickAdd])
+  }, [controller, commitQuickAdd])
+
+  const confirmStaleDraftReplace = useCallback(async () => {
+    const pending = staleDraftPrompt
+    setStaleDraftPrompt(null)
+    if (!pending) return
+    await clearThenLog(pending)
+  }, [staleDraftPrompt, clearThenLog])
 
   const commitEditedEntry = useCallback((edited, ts) => {
     if (!editingEntry) return
