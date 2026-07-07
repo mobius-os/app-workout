@@ -1,9 +1,10 @@
 // ---------------------------------------------------------------------------
 // Pure logic — no React, no DOM, no window. Everything here is a function of
 // its inputs so it can be unit-tested under `node --test` without a browser.
-// SOURCE OF TRUTH for index.jsx's inlined logic block: run `node build-entry.mjs`
-// after editing this file. (This file was reverse-synced from index.jsx during
-// the integrity-fix pass; the two are byte-identical modulo the export keyword.)
+// index.jsx imports these directly — logic.js is listed in mobius.json
+// source_files, so Mobius installs it alongside the entry. There is NO build
+// step: edit this file and run `npm test` (the old build-entry.mjs inline-block
+// workflow, which reverse-synced logic.js into index.jsx, is retired).
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------

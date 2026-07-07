@@ -50,7 +50,7 @@ export const CSS = `
 .wk-brand-fallback {
   width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
   align-items: center; justify-content: center;
-  background: var(--accent, currentColor); color: var(--bg, #0c0c0c);
+  background: var(--accent); color: var(--accent-fg);
   font-weight: 700; line-height: 1;
 }
 .wk-subtitle { margin: 0; font-size: 12px; color: var(--muted); user-select: none; }
@@ -173,7 +173,7 @@ export const CSS = `
 /* mobius-ui:Card v1 — keep in sync; library candidate. Diverge below the marker only. */
 .wk-card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; padding: 16px; margin-bottom: 14px;
+  border-radius: 12px; padding: 16px; margin-bottom: 14px;
 }
 .wk-card.is-ambiguous { border-color: var(--accent); }
 .wk-card-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; }
@@ -183,7 +183,7 @@ export const CSS = `
 /* mobius-ui:Button v1 — keep in sync; library candidate. Diverge below the marker only. */
 .wk-btn-primary {
   width: 100%; min-height: 48px; padding: 14px 16px; border-radius: 12px;
-  border: none; background: var(--accent); color: #fff;
+  border: none; background: var(--accent); color: var(--accent-fg);
   font-family: var(--font); font-size: 15px; font-weight: 600; cursor: pointer;
   touch-action: manipulation; user-select: none;
 }
@@ -203,7 +203,7 @@ export const CSS = `
   .wk-btn-secondary:not(:disabled):active { opacity: 0.8; transform: scale(0.97); }
 }
 .wk-btn-secondary.is-block { width: 100%; }
-.wk-btn-secondary.is-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+.wk-btn-secondary.is-danger { background: var(--danger); color: var(--accent-fg); border-color: var(--danger); }
 .wk-btn-ghost {
   min-height: 44px; padding: 10px 12px; border-radius: 8px;
   border: none; background: transparent; color: var(--accent);
@@ -238,11 +238,18 @@ export const CSS = `
 .wk-entry-meta { margin: 3px 0 0; font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .wk-entry-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .wk-icon-btn {
+  position: relative;
   width: 32px; height: 32px; border-radius: 8px;
   display: inline-flex; align-items: center; justify-content: center; line-height: 1;
   border: none; background: transparent; color: var(--muted);
   font-family: var(--font); font-size: 14px; font-weight: 800; cursor: pointer;
   touch-action: manipulation; user-select: none;
+}
+/* Extend the tap target to a 44px minimum (WCAG 2.5.5) without growing the 32px
+   visual box, so the dense entry/header rows stay compact. */
+.wk-icon-btn::before {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  width: 44px; height: 44px; transform: translate(-50%, -50%);
 }
 .wk-icon-btn:disabled { pointer-events: none; opacity: 0.5; }
 @media (prefers-reduced-motion: no-preference) {
@@ -287,8 +294,8 @@ export const CSS = `
 .wk-current-session-empty { padding: 16px 12px; color: var(--muted); font-size: 13px; }
 .wk-current-session-missing { margin: 0; padding: 0 12px 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .wk-finish-btn {
-  min-height: 38px; padding: 10px 12px; border-radius: 8px;
-  border: none; background: var(--accent); color: #fff;
+  min-height: 44px; padding: 10px 12px; border-radius: 8px;
+  border: none; background: var(--accent); color: var(--accent-fg);
   font-family: var(--font); font-size: 13px; font-weight: 800;
   white-space: nowrap; cursor: pointer;
   touch-action: manipulation; user-select: none;
@@ -310,7 +317,7 @@ export const CSS = `
 .wk-input {
   display: block; width: 100%; box-sizing: border-box; min-height: 44px; padding: 12px;
   background: var(--surface2, var(--surface)); color: var(--text);
-  border: 1px solid var(--border); border-radius: 10px;
+  border: 1px solid var(--border); border-radius: 8px;
   font-family: var(--font); font-size: 16px;
 }
 .wk-input:focus-visible {
@@ -419,7 +426,7 @@ export const CSS = `
 }
 .wk-modal {
   width: 100%; max-width: 320px; padding: 20px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
   overscroll-behavior: contain;
 }
@@ -461,7 +468,7 @@ button.wk-pill { cursor: pointer; }
 /* Category stat tiles — app-specific. */
 .wk-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(138px, 1fr)); gap: 10px; }
 .wk-stat-tile {
-  padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px; border: 1px solid var(--border); border-radius: 12px;
   background: color-mix(in srgb, var(--bg) 55%, transparent);
 }
 .wk-stat-head { display: flex; align-items: center; gap: 8px; }
@@ -492,7 +499,7 @@ button.wk-pill { cursor: pointer; }
 .wk-sheet {
   width: 100%; max-width: 480px; max-height: 88%;
   display: flex; flex-direction: column; overflow: hidden;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
 }
 .wk-sheet-head {
@@ -543,7 +550,7 @@ button.wk-pill { cursor: pointer; }
 .wk-quick-add {
   margin-bottom: 14px;
   padding: 12px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
 }
 .wk-quick-add-label {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -552,7 +559,7 @@ button.wk-pill { cursor: pointer; }
 }
 .wk-quick-chip {
   display: inline-flex; align-items: center; gap: 6px;
-  min-height: 38px; padding: 6px 12px; border-radius: 999px;
+  min-height: 44px; padding: 6px 12px; border-radius: 999px;
   border: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 65%, transparent);
   color: var(--text); font-family: var(--font); font-size: 13px; font-weight: 600;
   cursor: pointer; touch-action: manipulation; user-select: none;
@@ -565,7 +572,7 @@ button.wk-pill { cursor: pointer; }
   display: flex; gap: 6px; flex-wrap: wrap;
 }
 .wk-quick-add-btn {
-  min-height: 38px; padding: 6px 14px; border-radius: 999px;
+  min-height: 44px; padding: 6px 14px; border-radius: 999px;
   border: 1px dashed var(--border); background: transparent;
   color: var(--accent); font-family: var(--font); font-size: 13px; font-weight: 700;
   cursor: pointer; touch-action: manipulation; user-select: none;

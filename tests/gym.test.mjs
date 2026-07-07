@@ -1,34 +1,18 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
 
-const esbuild = '/home/hmzmrzx/projects/mobius/frontend/node_modules/.bin/esbuild'
-const nodePath = '/home/hmzmrzx/projects/mobius/frontend/node_modules'
-mkdirSync(new URL('./.build/', import.meta.url), { recursive: true })
-// Bundle the REAL pure-logic module the installed entry imports via source_files.
-// index.jsx no longer re-exports these functions (they live in logic.js now, the
-// single source of truth); bundling logic.js drives the identical code Mobius
-// ships, with no JSX/React in the graph.
-execFileSync(esbuild, [
-  '--bundle',
-  '--format=esm',
-  '--platform=node',
-  'logic.js',
-  '--outfile=tests/.build/logic.mjs',
-], {
-  cwd: new URL('..', import.meta.url),
-  env: { ...process.env, NODE_PATH: nodePath },
-  stdio: 'pipe',
-})
-
-const {
+// logic.js is pure ESM with no external imports — it is exactly the headless
+// module Mobius installs via mobius.json source_files — so it imports directly.
+// The old esbuild bundle-then-import step added nothing over a direct import
+// (there is nothing to bundle) and pinned an absolute esbuild path + NODE_PATH,
+// which broke a fresh clone; the direct import is portable and the same code.
+import {
   normalizeEntry,
   normalizeStoredEntries,
   mergeEntriesForSave,
   groupSessions,
   summarizeMetrics,
-} = await import('./.build/logic.mjs')
+} from '../logic.js'
 
 test('normalizeEntry guards timestamps and maps strength metrics to stored SI shape', () => {
   const before = Date.now()

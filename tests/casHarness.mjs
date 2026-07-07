@@ -13,22 +13,41 @@
 // So these tests run the exact code Mobius installs.
 
 import { readFile } from 'node:fs/promises'
+import { pathToFileURL } from 'node:url'
 
-// Resolve the platform runtime (the source of createUseDocument). These tests
-// are host-pinned exactly like the rest of the suite (npm test sets an absolute
-// NODE_PATH to mobius/frontend/node_modules), so an absolute runtime path is
-// consistent. Try the data-layer worktree the migration targets first, then the
-// main checkout, so the harness works from either tree.
-const RUNTIME_CANDIDATES = [
-  'file:///home/hmzmrzx/projects/mobius/.claude/worktrees/data-layer/frontend/public/mobius-runtime.js',
-  'file:///home/hmzmrzx/projects/mobius/frontend/public/mobius-runtime.js',
-]
+// Resolve the platform runtime (createUseDocument / DurableWriteError). It is NOT
+// an npm package — it ships in the Möbius repo — so discover it portably instead
+// of hard-pinning one host path: MOBIUS_RUNTIME (a path or file: URL) wins, then
+// the known checkout locations as a FALLBACK. A fresh clone runs the CAS gate by
+// pointing MOBIUS_RUNTIME at its mobius-runtime.js.
+function runtimeCandidates() {
+  const out = []
+  const env = process.env.MOBIUS_RUNTIME
+  if (env) out.push(/^[a-z][a-z0-9+.-]*:\/\//i.test(env) ? env : pathToFileURL(env).href)
+  out.push(
+    'file:///home/hmzmrzx/projects/mobius/frontend/public/mobius-runtime.js',
+    'file:///home/hmzmrzx/projects/mobius/.claude/worktrees/data-layer/frontend/public/mobius-runtime.js',
+  )
+  return out
+}
 async function importRuntime() {
+  const candidates = runtimeCandidates()
   let lastErr
-  for (const url of RUNTIME_CANDIDATES) {
-    try { return await import(url) } catch (e) { lastErr = e }
+  for (const url of candidates) {
+    try {
+      const mod = await import(url)
+      // A runtime is only usable here if it actually exports the useDocument CAS
+      // primitive; some checkouts ship a runtime without it, which would import
+      // fine but leave createUseDocument undefined.
+      if (typeof mod.createUseDocument === 'function') return mod
+      lastErr = new Error(`${url} has no createUseDocument export`)
+    } catch (e) { lastErr = e }
   }
-  throw lastErr
+  throw new Error(
+    'Could not load a Möbius platform runtime that exports createUseDocument. Set '
+    + 'MOBIUS_RUNTIME to a mobius-runtime.js that has the useDocument CAS primitive. '
+    + `Last error: ${lastErr && lastErr.message}`,
+  )
 }
 const { createUseDocument, DurableWriteError } = await importRuntime()
 
