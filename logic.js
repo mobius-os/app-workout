@@ -650,20 +650,43 @@ export function entriesFromCurrentSession(session) {
   }))
 }
 
+// True when an entry chosen at `entryTs` belongs to the ALREADY-active draft
+// rather than starting a fresh one. A draft's entries are stamped near its
+// startedAt (startedAt + index*1000), so its live span is [startedAt, lastTs].
+// An entry within one SESSION_GAP_MS of that span joins it — so a same-workout
+// quick-add a couple hours in, or one slightly backdated, still groups. An entry
+// BEYOND the gap starts its OWN draft: this is what stops a stale, still-open
+// Saturday draft from absorbing a Monday quick-add and committing the Monday
+// work under Saturday's date. A non-finite start/entry ts degrades to "belongs"
+// so a malformed draft never silently forks. Pure; reads only its inputs.
+export function entryBelongsToActiveDraft(activeSession, entryTs, gapMs = SESSION_GAP_MS) {
+  if (!activeSession) return false
+  const start = Number(activeSession.startedAt)
+  const ts = Number(entryTs)
+  if (!Number.isFinite(start) || !Number.isFinite(ts)) return true
+  const entries = Array.isArray(activeSession.entries) ? activeSession.entries : []
+  const lastRaw = entries.length ? Number(entries[entries.length - 1].ts) : start
+  const lastTs = Number.isFinite(lastRaw) ? lastRaw : start
+  return ts >= start - gapMs && ts <= lastTs + gapMs
+}
+
 // Quick-add and the embedded chat agent are co-writers of the SAME
-// current_session.json draft: logging an entry implicitly starts a session
-// when none is active, and extends the active one otherwise. Routing the
-// result through normalizeCurrentSession keeps the two writers byte-
-// compatible — id "session-<startedAt>", status "active", entries stamped
-// with the shared sessionId/localDate and startedAt + index*1000 ordering,
-// exactly the shape the agent prompt documents. Never mutates the input.
-export function appendEntryToCurrentSession(session, entry, now = Date.now()) {
+// current_session.json draft: logging an entry implicitly starts a session when
+// none is active, extends the active one when the entry falls INSIDE its window,
+// and starts a FRESH draft when the chosen time falls OUTSIDE it (see
+// entryBelongsToActiveDraft — this is what preserves an explicit quick-add
+// Date/Time instead of re-stamping it to a stale draft's start date). Routing
+// the result through normalizeCurrentSession keeps the two writers byte-
+// compatible — id "session-<startedAt>", status "active", entries stamped with
+// the shared sessionId/localDate and startedAt + index*1000 ordering, exactly
+// the shape the agent prompt documents. Never mutates the input.
+export function appendEntryToCurrentSession(session, entry, now = Date.now(), gapMs = SESSION_GAP_MS) {
   const active = normalizeCurrentSession(session, now)
-  if (active) {
-    return normalizeCurrentSession({ ...active, entries: [...active.entries, entry] }, now)
-  }
   const tsRaw = Number(entry?.ts)
   const startedAt = Number.isFinite(tsRaw) ? tsRaw : now
+  if (active && entryBelongsToActiveDraft(active, startedAt, gapMs)) {
+    return normalizeCurrentSession({ ...active, entries: [...active.entries, entry] }, now)
+  }
   return normalizeCurrentSession({
     id: `session-${startedAt}`,
     startedAt,
@@ -1660,6 +1683,7 @@ export function createSessionController(deps) {
     currentDoc,
     addTombstones = () => {},
     onWriteError = () => {},
+    onReadError = () => {},
     now = () => Date.now(),
   } = deps
 
@@ -1782,8 +1806,15 @@ export function createSessionController(deps) {
     // Reload current_session.json (mount, subscribe, poll). A pure refresh.
     load() {
       return enqueue(processLoad).catch((err) => {
-        onWriteError(err, 'session_load')
-        throw err
+        // A load is a pure READ (currentDoc.refresh); a failure — an offline poll
+        // tick, a flaky refresh — is NOT a save failure, so it goes to the quiet
+        // read-error sink, never the "Save failed" pill or the per-tick error
+        // signal. Durable WRITE failures still surface through onWriteError from
+        // the write paths. Reads self-heal (the next poll/subscribe retries), so
+        // resolve with the last-known value rather than rejecting — a rejected
+        // poll tick would otherwise raise an unhandled rejection every interval.
+        onReadError(err, 'session_load')
+        return currentDoc.value
       })
     },
     // Run a transform over the freshest draft (quick-add, delete-draft, clear).
@@ -1794,9 +1825,15 @@ export function createSessionController(deps) {
     entriesWrite(intent = {}) {
       return enqueue(() => processEntriesWrite(intent))
     },
-    // Finish: stamp → commit → clear, as one serial cross-file step.
+    // Finish: stamp → commit → clear, as one serial cross-file step. If the
+    // controller was disposed before the queued work ran, enqueue resolves
+    // `undefined`; return a benign empty commit instead so the caller's
+    // `const { committed } = await finish()` never throws a spurious
+    // finish error (source:'finish') on an app switch mid-Finish.
     finish() {
-      return enqueue(processFinish)
+      return enqueue(processFinish).then((result) => (
+        result || { committed: [], entries: entriesDoc.value }
+      ))
     },
     // Read-only accessor for the React layer (e.g. signal payloads).
     getSession() { return currentDoc.value },

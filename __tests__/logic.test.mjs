@@ -21,7 +21,9 @@ import {
   sportIconKey, sportIconColor, SPORT_ICON_RULES, SPORT_ICON_COLORS, CATEGORIES,
   createVisiblePoller, createSessionController,
   makeEntriesDocConfig, makeCurrentSessionDocConfig, reconcileDraftIds,
+  entryBelongsToActiveDraft,
 } from '../logic.js'
+import { metresToDisplay, secondsToDisplay } from '../format.js'
 import { makeCasStore, renderDoc } from '../tests/casHarness.mjs'
 
 // --- robustness against bad/odd LLM output (Codex review hardening) ---
@@ -1304,4 +1306,125 @@ test('worksheet completion: filling reps+weight on a blank entry flips currentSe
   assert.equal(completed.entries[0].metrics.sets.length, 2)
   assert.equal(completed.entries[0].metrics.sets[0].weight_kg, 80)
   assert.equal(completed.entries[0].metrics.sets[0].reps, 5)
+})
+
+// --- bug (medium): quick-add Date/Time discarded when a stale draft is open ---
+// A backdated / forward-dated quick-add made while an old draft was still open
+// used to be absorbed into that draft and re-stamped to the draft's start date,
+// so a Monday workout committed under Saturday. appendEntryToCurrentSession now
+// starts a FRESH draft when the entry falls outside the active session window.
+
+test('quick-add within the session window groups into the active draft', () => {
+  const startedAt = base
+  const active = appendEntryToCurrentSession(null, quickAddEntry(startedAt, 'Squat', 100, 5))
+  // A second quick-add two hours later (inside the 4h gap) stays in the session.
+  const next = appendEntryToCurrentSession(active, quickAddEntry(startedAt + 2 * 3_600_000, 'Bench', 80, 5))
+  assert.equal(next.id, active.id)
+  assert.equal(next.entries.length, 2)
+})
+
+test('quick-add dated beyond the gap starts a fresh draft and keeps its own date', () => {
+  const saturday = base
+  const monday = base + 2 * DAY
+  assert.notEqual(localDate(new Date(monday)), localDate(new Date(saturday)))
+  const active = appendEntryToCurrentSession(null, quickAddEntry(saturday, 'Squat', 100, 5))
+  // A Monday-dated quick-add must NOT land under the Saturday draft's date.
+  const next = appendEntryToCurrentSession(active, quickAddEntry(monday, 'Deadlift', 140, 3))
+  assert.equal(next.startedAt, monday)
+  assert.equal(next.id, `session-${monday}`)
+  assert.equal(next.entries.length, 1)
+  assert.equal(next.localDate, localDate(new Date(monday)))
+  // Committing the fresh draft stamps the Monday local date, not Saturday's.
+  const committed = entriesFromCurrentSession(next)
+  assert.equal(committed[0].localDate, localDate(new Date(monday)))
+})
+
+test('entryBelongsToActiveDraft: inside one gap joins, beyond it forks', () => {
+  const active = normalizeCurrentSession(
+    appendEntryToCurrentSession(null, quickAddEntry(base, 'Squat', 100, 5)),
+  )
+  assert.equal(entryBelongsToActiveDraft(active, base + 3_600_000), true)   // 1h in
+  assert.equal(entryBelongsToActiveDraft(active, base + 2 * DAY), false)    // 2 days out
+  assert.equal(entryBelongsToActiveDraft(null, base), false)               // no draft
+})
+
+// --- bug (medium): id-less agent draft entries un-editable on the FIRST tap ---
+// CurrentSessionPanel mints fresh render ids for id-less entries; the draft
+// transforms used to filter the raw id-less doc value by those render ids and
+// match nothing. Reconciling the write base against the rendered (stamped)
+// session makes the first tap land. These drive the exact index.jsx transform.
+
+function idlessAgentDraft(startedAt) {
+  // What an agent may write: entries with NO id (a prompt-contract violation the
+  // app must absorb) at fixed positions.
+  return {
+    id: `session-${startedAt}`,
+    startedAt,
+    status: 'active',
+    entries: [
+      { category: 'strength', activity: 'Squat', metrics: { sets: [{ weight_kg: 100, reps: 5, unit: 'kg' }] }, source: 'ai' },
+      { category: 'strength', activity: 'Bench', metrics: { sets: [{ weight_kg: 80, reps: 5, unit: 'kg' }] }, source: 'ai' },
+    ],
+  }
+}
+
+test('first delete of an id-less draft entry removes it (reconcile against render ids)', () => {
+  const raw = idlessAgentDraft(base)
+  // The UI renders the STAMPED session (normalizeCurrentSession mints stable ids).
+  const stamped = normalizeCurrentSession(raw)
+  const tappedId = stamped.entries[0].id
+  // OLD broken behavior: filtering the raw id-less base by the render id removes
+  // nothing (no raw entry carries that id) — the first tap no-oped.
+  const rawEntries = raw.entries
+  assert.equal(rawEntries.filter((e) => e.id !== tappedId).length, rawEntries.length)
+  // FIX: reconcile the base against the rendered session, then filter.
+  const reconciled = reconcileDraftIds(raw, stamped)
+  const nextEntries = reconciled.entries.filter((e) => e.id !== tappedId)
+  assert.equal(nextEntries.length, 1)
+  const result = normalizeCurrentSession({ ...reconciled, entries: nextEntries }, reconciled.startedAt)
+  assert.equal(result.entries.length, 1)
+  assert.equal(result.entries[0].activity, 'Bench')
+})
+
+test('first edit of an id-less draft entry patches it (reconcile against render ids)', () => {
+  const raw = idlessAgentDraft(base)
+  const stamped = normalizeCurrentSession(raw)
+  const tappedId = stamped.entries[0].id
+  const reconciled = reconcileDraftIds(raw, stamped)
+  const nextEntries = reconciled.entries.map((entry) => {
+    if (entry.id !== tappedId) return entry
+    return normalizeEntry(
+      { category: entry.category, activity: entry.activity, metrics: { sets: [{ weight: 110, reps: 5, unit: 'kg' }] } },
+      { id: entry.id, ts: entry.ts, sessionId: entry.sessionId, source: 'manual', confirmed: true },
+    )
+  })
+  const result = normalizeCurrentSession({ ...reconciled, entries: nextEntries }, reconciled.startedAt)
+  assert.equal(result.entries.length, 2)
+  const squat = result.entries.find((e) => e.activity === 'Squat')
+  assert.equal(squat.metrics.sets[0].weight_kg, 110)
+})
+
+// --- bug (medium): cardio/other worksheet unit ambiguity --------------------
+// A stored 1500m used to render a bare "1500" and infer the unit from the value,
+// so typing "2" saved 2m not 2km. The worksheet now shows an explicit unit; the
+// edit path (normalizeEntry over a display-unit draft) stores correct SI.
+
+test('cardio display exposes an explicit unit for non-round SI values', () => {
+  assert.deepEqual(metresToDisplay(1500), { value: 1500, unit: 'm' })
+  assert.deepEqual(metresToDisplay(2000), { value: 2, unit: 'km' })
+  assert.deepEqual(secondsToDisplay(2430), { value: 2430, unit: 's' })
+  assert.deepEqual(secondsToDisplay(2700), { value: 45, unit: 'min' })
+})
+
+test('editing a cardio entry with an explicit unit stores correct SI', () => {
+  const edited2km = normalizeEntry(
+    { category: 'running', activity: 'Run', metrics: { distance: { value: 2, unit: 'km' } } },
+    { id: 'r', ts: base, source: 'manual', confirmed: true },
+  )
+  assert.equal(edited2km.metrics.distance_m, 2000)
+  const edited40min = normalizeEntry(
+    { category: 'running', activity: 'Run', metrics: { duration: { value: 40.5, unit: 'min' } } },
+    { id: 'r', ts: base, source: 'manual', confirmed: true },
+  )
+  assert.equal(edited40min.metrics.duration_s, 2430)
 })

@@ -18,7 +18,7 @@ import {
   createVisiblePoller, currentSessionReady, groupSessions,
   lastEntryForExercise, makeCurrentSessionDocConfig, makeEntriesDocConfig,
   migrateLegacyState, normalizeCurrentSession, normalizeEntry,
-  normalizeStoredEntries, strengthPRs,
+  normalizeStoredEntries, reconcileDraftIds, strengthPRs,
 } from './logic.js'
 import { SportIcon } from './ui/SportIcon.jsx'
 import { ChatBubbleIcon } from './ui/Icons.jsx'
@@ -127,6 +127,18 @@ export default function App({ appId, token }) {
   const entries = entriesDoc.status === 'loading' ? null : entriesDoc.value
   const currentSession = currentDoc.value
 
+  // Stamp id-less draft entries to STABLE ids ONCE per raw draft value, so the
+  // ids the UI renders match the ids the draft transforms (delete/edit) filter
+  // on. CurrentSessionPanel used to normalize for render and mint FRESH random
+  // ids each render, while deleteDraftEntry/editSessionEntry compared them
+  // against the raw id-less doc value — so the first tap on an agent-written
+  // id-less draft no-opped and only "worked" on the second tap (after a write
+  // had stamped ids). Passing this stamped session down, and reconciling each
+  // write's fresh base against it below, makes the first tap land.
+  const stampedSession = useMemo(() => normalizeCurrentSession(currentSession), [currentSession])
+  const stampedSessionRef = useRef(stampedSession)
+  stampedSessionRef.current = stampedSession
+
   // Feed the SyncPill from the docs' write status (durable resolve clears the
   // error; a rejected DurableWriteError sets it). Mirrors the old bumpSync(result).
   useEffect(() => {
@@ -159,6 +171,13 @@ export default function App({ appId, token }) {
       console.error(`${source} failed`, err)
       bumpSync({ error: true })
       window.mobius?.signal?.('error', { message: err?.message || `${source} failed`, source })
+    },
+    onReadError: (err, source) => {
+      // A refresh/poll READ failed — self-healing (the next tick retries), NOT a
+      // save failure. Log it, but do NOT trip the write-error pill or emit a
+      // per-tick error signal; the plain Offline pill covers the offline case.
+      // eslint-disable-next-line no-console
+      console.error(`${source} failed`, err)
     },
   }), [entriesDocHandle, currentDocHandle, tombstones, bumpSync])
   // Dispose the previous controller on app switch / unmount so a stale enqueued
@@ -382,9 +401,16 @@ export default function App({ appId, token }) {
     try {
       await controller.sessionWrite((base) => {
         if (!base) return null
-        const nextEntries = base.entries.filter((entry) => entry.id !== id)
+        // Reconcile the fresh write base's id-less entries against the ids the UI
+        // rendered (stampedSessionRef), so the tapped row's id matches a base
+        // entry on the FIRST interaction. reconcileDraftIds is a no-op once every
+        // entry already carries an id, so the normal (post-first-write) path is
+        // unchanged.
+        const reconciled = reconcileDraftIds(base, stampedSessionRef.current)
+        const rawEntries = Array.isArray(reconciled.entries) ? reconciled.entries : []
+        const nextEntries = rawEntries.filter((entry) => entry.id !== id)
         if (nextEntries.length === 0) return null
-        return normalizeCurrentSession({ ...base, entries: nextEntries }, base.startedAt)
+        return normalizeCurrentSession({ ...reconciled, entries: nextEntries }, reconciled.startedAt)
       })
       retryActionRef.current = null
     } catch (err) {
@@ -410,7 +436,12 @@ export default function App({ appId, token }) {
     try {
       await controller.sessionWrite((base) => {
         if (!base) return base
-        const nextEntries = base.entries.map((entry) => {
+        // Same first-tap reconciliation as deleteDraftEntry: stamp the base's
+        // id-less entries with the rendered ids so entryId matches on the first
+        // edit. No-op once entries already carry ids.
+        const reconciled = reconcileDraftIds(base, stampedSessionRef.current)
+        const rawEntries = Array.isArray(reconciled.entries) ? reconciled.entries : []
+        const nextEntries = rawEntries.map((entry) => {
           if (entry.id !== entryId) return entry
           return normalizeEntry(
             { category: entry.category, activity: entry.activity, metrics: metricsDraft },
@@ -424,7 +455,7 @@ export default function App({ appId, token }) {
             },
           )
         })
-        return normalizeCurrentSession({ ...base, entries: nextEntries }, base.startedAt)
+        return normalizeCurrentSession({ ...reconciled, entries: nextEntries }, reconciled.startedAt)
       })
       retryActionRef.current = null
     } catch (err) {
@@ -772,9 +803,9 @@ export default function App({ appId, token }) {
                         Session saved — find it in History.
                       </div>
                     )}
-                    {currentSession && (
+                    {stampedSession && (
                       <CurrentSessionPanel
-                        session={currentSession}
+                        session={stampedSession}
                         onFinish={finishCurrentSession}
                         onDeleteEntry={deleteDraftEntry}
                         onEditEntry={editSessionEntry}

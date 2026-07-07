@@ -519,6 +519,26 @@ async function testJ_disposeDuringWrite() {
   pass('dispose during write [disposed controller aborts cleanly]')
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// Test K — a Finish enqueued after the controller was disposed resolves a BENIGN
+// empty commit ({committed:[], entries}) instead of `undefined`. Before the fix,
+// enqueue resolved `undefined` on a disposed controller, so the caller's
+// `const { committed } = await controller.finish()` threw a TypeError that
+// surfaced as a spurious finish error (source:'finish') on an app switch
+// mid-Finish. Now the caller's destructure is always safe.
+// ════════════════════════════════════════════════════════════════════════════
+async function testK_disposedFinishReturnsBenign() {
+  const store = makeCasStore({ 'current_session.json': readableDraft('Swimming') })
+  const { controller } = makeRealController(store)
+  await settle()
+  controller.dispose()   // app switch before Finish runs
+  const result = await controller.finish()
+  assert.ok(result && typeof result === 'object', 'disposed finish resolves an object, not undefined')
+  assert.deepEqual(result.committed, [], 'disposed finish commits nothing')
+  assert.ok('entries' in result, 'disposed finish still returns an entries field')
+  pass('disposed finish returns a benign empty commit [no spurious finish error]')
+}
+
 // ── run ─────────────────────────────────────────────────────────────────────
 await testA_loadNeverClobbersAppend()
 await testB_crossContextCasZeroLoss()
@@ -530,4 +550,5 @@ await testG_finishRetryIdempotent()
 await testH_nonDurableSurfacesError()
 await testI_loadAndQuickAddSerial()
 await testJ_disposeDuringWrite()
+await testK_disposedFinishReturnsBenign()
 console.log('\nALL INTEGRITY TESTS PASSED')
