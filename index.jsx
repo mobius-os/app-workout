@@ -16,7 +16,7 @@ import { draftFromStoredEntry } from './format.js'
 import {
   appendEntryToCurrentSession, assignSession, createSessionController,
   createVisiblePoller, currentSessionReady, entryBelongsToActiveDraft,
-  groupSessions, lastEntryForExercise, makeCurrentSessionDocConfig,
+  groupSessions, lastEntryForExercise, localDate, makeCurrentSessionDocConfig,
   makeEntriesDocConfig, migrateLegacyState, normalizeCurrentSession,
   normalizeEntry, normalizeStoredEntries, reconcileDraftIds,
   sessionEntryMissing, strengthPRs,
@@ -212,6 +212,10 @@ export default function App({ appId, token }) {
   const [lastEntryForQuickAdd, setLastEntryForQuickAdd] = useState(null)
   const [deletePending, setDeletePending] = useState(null) // entry id awaiting confirm
   const [clearSessionPending, setClearSessionPending] = useState(false)
+  // A quick-add whose Date/Time falls outside the open draft's window: hold it
+  // and prompt to clear the stale draft first (see commitQuickAdd). Shape:
+  // { draft, ts, oldDate, newDate } | null.
+  const [staleDraftPrompt, setStaleDraftPrompt] = useState(null)
   const navHandleRef = useRef(null)
 
   // DATA INVARIANT: under ANY interleaving of quick-add, History edit, History
@@ -342,21 +346,33 @@ export default function App({ appId, token }) {
   // The first saved entry implicitly starts a session (the CurrentSessionPanel
   // appearing with the entry IS the save feedback); entries reach committed
   // history exactly once, when Finish session commits the draft.
-  const commitQuickAdd = useCallback(async (draft, ts) => {
+  const commitQuickAdd = useCallback(async (draft, ts, opts = {}) => {
     const entry = normalizeEntry(draft, {
       ts,
       raw: '',
       source: 'manual',
       confirmed: true,
     })
-    // draft_stale_resumed {age_hours}: the chosen time falls outside the
-    // currently-open draft, so this quick-add starts a FRESH draft rather than
-    // extending the old one. Reflection uses this to separate a UX-expiry problem
-    // (a stale draft left open for hours/days) from ordinary same-session logging.
-    const activeDraft = normalizeCurrentSession(controller.getSession())
-    if (activeDraft && !entryBelongsToActiveDraft(activeDraft, ts)) {
-      const ageHours = Math.max(0, Math.round((Date.now() - activeDraft.startedAt) / 3_600_000))
-      window.mobius?.signal?.('draft_stale_resumed', { age_hours: ageHours })
+    // A quick-add whose chosen Date/Time falls OUTSIDE the open draft's window
+    // can't just fork a fresh draft: current_session.json is one slot with a UNION
+    // merge, which would re-combine the fork back into the stale draft under the
+    // older start date — that IS the misdating bug. So block it here and prompt
+    // the owner to clear the stale draft first (confirmStaleDraftReplace clears,
+    // then re-logs with skipStaleCheck so the entry keeps its own date). Also emit
+    // draft_stale_resumed {age_hours} so Reflection sees the UX-expiry case.
+    if (!opts.skipStaleCheck) {
+      const activeDraft = normalizeCurrentSession(controller.getSession())
+      if (activeDraft && !entryBelongsToActiveDraft(activeDraft, ts)) {
+        const ageHours = Math.max(0, Math.round((Date.now() - activeDraft.startedAt) / 3_600_000))
+        window.mobius?.signal?.('draft_stale_resumed', { age_hours: ageHours })
+        setStaleDraftPrompt({
+          draft,
+          ts,
+          oldDate: activeDraft.localDate,
+          newDate: localDate(new Date(ts)),
+        })
+        return
+      }
     }
     // Enqueue a session-transform intent. The controller re-reads the freshest
     // store value AT PROCESS TIME and merges it with its in-memory truth FIRST
@@ -383,6 +399,28 @@ export default function App({ appId, token }) {
     // can compare manual workout categories against the canonical vocabulary.
     window.mobius?.signal?.('item_created', { type: entry.category })
   }, [closeNestedNav, controller])
+
+  // The stale-draft prompt confirmed: discard the open (stale) draft, then log the
+  // held quick-add. Clearing FIRST is what lets the new entry keep its own date —
+  // with the stale draft gone, the append starts a fresh session the UNION merge
+  // won't re-combine. Both steps run serially on the controller chain (clear then
+  // append), so no other local write interleaves between them.
+  const confirmStaleDraftReplace = useCallback(async () => {
+    const pending = staleDraftPrompt
+    setStaleDraftPrompt(null)
+    if (!pending) return
+    try {
+      await controller.sessionWrite(() => null)
+    } catch (err) {
+      retryActionRef.current = () => commitQuickAdd(pending.draft, pending.ts, { skipStaleCheck: true })
+      window.mobius?.signal?.('error', {
+        message: err?.message || 'current session save failed',
+        source: 'session_clear',
+      })
+      return
+    }
+    await commitQuickAdd(pending.draft, pending.ts, { skipStaleCheck: true })
+  }, [staleDraftPrompt, controller, commitQuickAdd])
 
   const commitEditedEntry = useCallback((edited, ts) => {
     if (!editingEntry) return
@@ -912,6 +950,15 @@ export default function App({ appId, token }) {
           confirmLabel="Clear"
           onConfirm={clearCurrentSession}
           onCancel={() => { closeNestedNav(); setClearSessionPending(false) }}
+        />
+      )}
+      {staleDraftPrompt && (
+        <ConfirmModal
+          title="Start a new session?"
+          body={`Your current session is from ${staleDraftPrompt.oldDate}. Logging this ${staleDraftPrompt.newDate} entry discards that unfinished draft and starts a new session.`}
+          confirmLabel="Discard & log"
+          onConfirm={confirmStaleDraftReplace}
+          onCancel={() => setStaleDraftPrompt(null)}
         />
       )}
     </div>

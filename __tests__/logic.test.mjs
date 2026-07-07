@@ -1311,8 +1311,11 @@ test('worksheet completion: filling reps+weight on a blank entry flips currentSe
 // --- bug (medium): quick-add Date/Time discarded when a stale draft is open ---
 // A backdated / forward-dated quick-add made while an old draft was still open
 // used to be absorbed into that draft and re-stamped to the draft's start date,
-// so a Monday workout committed under Saturday. appendEntryToCurrentSession now
-// starts a FRESH draft when the entry falls outside the active session window.
+// so a Monday workout committed under Saturday. The fix gates the quick-add on
+// entryBelongsToActiveDraft: an in-window entry extends the draft; a cross-window
+// one is blocked with a "finish/clear the old session first" prompt in the UI (a
+// forked draft can't just be written — the current_session UNION merge would
+// re-combine it back into the stale draft; see the predicate's own comment).
 
 test('quick-add within the session window groups into the active draft', () => {
   const startedAt = base
@@ -1323,29 +1326,26 @@ test('quick-add within the session window groups into the active draft', () => {
   assert.equal(next.entries.length, 2)
 })
 
-test('quick-add dated beyond the gap starts a fresh draft and keeps its own date', () => {
-  const saturday = base
-  const monday = base + 2 * DAY
-  assert.notEqual(localDate(new Date(monday)), localDate(new Date(saturday)))
-  const active = appendEntryToCurrentSession(null, quickAddEntry(saturday, 'Squat', 100, 5))
-  // A Monday-dated quick-add must NOT land under the Saturday draft's date.
-  const next = appendEntryToCurrentSession(active, quickAddEntry(monday, 'Deadlift', 140, 3))
-  assert.equal(next.startedAt, monday)
-  assert.equal(next.id, `session-${monday}`)
-  assert.equal(next.entries.length, 1)
-  assert.equal(next.localDate, localDate(new Date(monday)))
-  // Committing the fresh draft stamps the Monday local date, not Saturday's.
-  const committed = entriesFromCurrentSession(next)
-  assert.equal(committed[0].localDate, localDate(new Date(monday)))
-})
-
-test('entryBelongsToActiveDraft: inside one gap joins, beyond it forks', () => {
+test('entryBelongsToActiveDraft gates the quick-add: in-window joins, cross-window prompts', () => {
   const active = normalizeCurrentSession(
     appendEntryToCurrentSession(null, quickAddEntry(base, 'Squat', 100, 5)),
   )
-  assert.equal(entryBelongsToActiveDraft(active, base + 3_600_000), true)   // 1h in
-  assert.equal(entryBelongsToActiveDraft(active, base + 2 * DAY), false)    // 2 days out
+  assert.equal(entryBelongsToActiveDraft(active, base + 3_600_000), true)   // 1h in → extend
+  assert.equal(entryBelongsToActiveDraft(active, base + 2 * DAY), false)    // 2 days → prompt
   assert.equal(entryBelongsToActiveDraft(null, base), false)               // no draft
+})
+
+test('after the stale draft is cleared, the new entry keeps its own date', () => {
+  const saturday = base
+  const monday = base + 2 * DAY
+  assert.notEqual(localDate(new Date(monday)), localDate(new Date(saturday)))
+  // The UI clears the stale draft (→ no active session), then logs the Monday
+  // entry, which starts its own session and commits under the Monday date.
+  const fresh = appendEntryToCurrentSession(null, quickAddEntry(monday, 'Deadlift', 140, 3))
+  assert.equal(fresh.startedAt, monday)
+  assert.equal(fresh.localDate, localDate(new Date(monday)))
+  const committed = entriesFromCurrentSession(fresh)
+  assert.equal(committed[0].localDate, localDate(new Date(monday)))
 })
 
 // --- bug (medium): id-less agent draft entries un-editable on the FIRST tap ---

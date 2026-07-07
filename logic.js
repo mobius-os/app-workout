@@ -652,14 +652,17 @@ export function entriesFromCurrentSession(session) {
 }
 
 // True when an entry chosen at `entryTs` belongs to the ALREADY-active draft
-// rather than starting a fresh one. A draft's entries are stamped near its
-// startedAt (startedAt + index*1000), so its live span is [startedAt, lastTs].
-// An entry within one SESSION_GAP_MS of that span joins it — so a same-workout
-// quick-add a couple hours in, or one slightly backdated, still groups. An entry
-// BEYOND the gap starts its OWN draft: this is what stops a stale, still-open
-// Saturday draft from absorbing a Monday quick-add and committing the Monday
-// work under Saturday's date. A non-finite start/entry ts degrades to "belongs"
-// so a malformed draft never silently forks. Pure; reads only its inputs.
+// (its chosen time is within one SESSION_GAP_MS of the draft's span) rather than
+// to a new session. The UI uses this to DECIDE whether a quick-add extends the
+// open draft or must be blocked with a "finish/clear the old session first"
+// prompt. It deliberately does NOT gate appendEntryToCurrentSession: current_
+// session.json is a single slot with a UNION merge (mergeCurrentSessions keeps
+// every co-writer entry so a concurrent agent append is never lost), so a forked
+// "fresh" draft written through that merge is simply re-unioned back into the
+// stale draft under the older startedAt — re-dating the new entry. Preventing the
+// cross-day merge therefore has to happen BEFORE the write (clear the stale draft
+// first), which is the UI's job; this predicate is how it knows to. A non-finite
+// start/entry ts degrades to "belongs" so a malformed draft never forks. Pure.
 export function entryBelongsToActiveDraft(activeSession, entryTs, gapMs = SESSION_GAP_MS) {
   if (!activeSession) return false
   const start = Number(activeSession.startedAt)
@@ -673,21 +676,21 @@ export function entryBelongsToActiveDraft(activeSession, entryTs, gapMs = SESSIO
 
 // Quick-add and the embedded chat agent are co-writers of the SAME
 // current_session.json draft: logging an entry implicitly starts a session when
-// none is active, extends the active one when the entry falls INSIDE its window,
-// and starts a FRESH draft when the chosen time falls OUTSIDE it (see
-// entryBelongsToActiveDraft — this is what preserves an explicit quick-add
-// Date/Time instead of re-stamping it to a stale draft's start date). Routing
-// the result through normalizeCurrentSession keeps the two writers byte-
-// compatible — id "session-<startedAt>", status "active", entries stamped with
-// the shared sessionId/localDate and startedAt + index*1000 ordering, exactly
-// the shape the agent prompt documents. Never mutates the input.
-export function appendEntryToCurrentSession(session, entry, now = Date.now(), gapMs = SESSION_GAP_MS) {
+// none is active and extends the active one otherwise. Routing the result
+// through normalizeCurrentSession keeps the two writers byte-compatible — id
+// "session-<startedAt>", status "active", entries stamped with the shared
+// sessionId/localDate and startedAt + index*1000 ordering, exactly the shape the
+// agent prompt documents. A cross-window quick-add is handled by the UI BEFORE it
+// reaches here (see entryBelongsToActiveDraft): it clears the stale draft first,
+// so by the time this appends there is either no active draft or an in-window
+// one. Never mutates the input.
+export function appendEntryToCurrentSession(session, entry, now = Date.now()) {
   const active = normalizeCurrentSession(session, now)
-  const tsRaw = Number(entry?.ts)
-  const startedAt = Number.isFinite(tsRaw) ? tsRaw : now
-  if (active && entryBelongsToActiveDraft(active, startedAt, gapMs)) {
+  if (active) {
     return normalizeCurrentSession({ ...active, entries: [...active.entries, entry] }, now)
   }
+  const tsRaw = Number(entry?.ts)
+  const startedAt = Number.isFinite(tsRaw) ? tsRaw : now
   return normalizeCurrentSession({
     id: `session-${startedAt}`,
     startedAt,
