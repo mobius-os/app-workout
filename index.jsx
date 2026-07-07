@@ -217,6 +217,7 @@ export default function App({ appId, token }) {
   // { draft, ts, oldDate, newDate } | null.
   const [staleDraftPrompt, setStaleDraftPrompt] = useState(null)
   const navHandleRef = useRef(null)
+  const staleDraftNavHandleRef = useRef(null)
 
   // DATA INVARIANT: under ANY interleaving of quick-add, History edit, History
   // delete, Finish, retry, poll, subscribe, and embedded-agent id-less co-write,
@@ -342,6 +343,30 @@ export default function App({ appId, token }) {
     navHandleRef.current = null
   }, [])
 
+  const closeStaleDraftNav = useCallback(() => {
+    try { staleDraftNavHandleRef.current?.close?.() } catch {}
+    staleDraftNavHandleRef.current = null
+  }, [])
+
+  const closeStaleDraftPrompt = useCallback(() => {
+    closeStaleDraftNav()
+    setStaleDraftPrompt(null)
+  }, [closeStaleDraftNav])
+
+  const openStaleDraftPrompt = useCallback(async (prompt) => {
+    closeStaleDraftNav()
+    if (window.mobius?.nav?.open) {
+      const handle = window.mobius.nav.open('workout-stale-draft', () => {
+        staleDraftNavHandleRef.current = null
+        setStaleDraftPrompt(null)
+      })
+      staleDraftNavHandleRef.current = handle
+      await handle.ready?.catch(() => false)
+      if (staleDraftNavHandleRef.current !== handle) return
+    }
+    setStaleDraftPrompt(prompt)
+  }, [closeStaleDraftNav])
+
   // Quick-add writes the current-session draft, never entries.json directly.
   // The first saved entry implicitly starts a session (the CurrentSessionPanel
   // appearing with the entry IS the save feedback); entries reach committed
@@ -365,7 +390,7 @@ export default function App({ appId, token }) {
       if (activeDraft && !entryBelongsToActiveDraft(activeDraft, ts)) {
         const ageHours = Math.max(0, Math.round((Date.now() - activeDraft.startedAt) / 3_600_000))
         window.mobius?.signal?.('draft_stale_resumed', { age_hours: ageHours })
-        setStaleDraftPrompt({
+        await openStaleDraftPrompt({
           draft,
           ts,
           oldDate: activeDraft.localDate,
@@ -398,7 +423,7 @@ export default function App({ appId, token }) {
     // item_created {type}: the domain noun is the activity category, so Reflection
     // can compare manual workout categories against the canonical vocabulary.
     window.mobius?.signal?.('item_created', { type: entry.category })
-  }, [closeNestedNav, controller])
+  }, [closeNestedNav, controller, openStaleDraftPrompt])
 
   // The stale-draft prompt confirmed: discard the open (stale) draft, then log the
   // held quick-add. Clearing FIRST is what lets the new entry keep its own date —
@@ -426,10 +451,10 @@ export default function App({ appId, token }) {
 
   const confirmStaleDraftReplace = useCallback(async () => {
     const pending = staleDraftPrompt
-    setStaleDraftPrompt(null)
+    closeStaleDraftPrompt()
     if (!pending) return
     await clearThenLog(pending)
-  }, [staleDraftPrompt, clearThenLog])
+  }, [staleDraftPrompt, closeStaleDraftPrompt, clearThenLog])
 
   const commitEditedEntry = useCallback((edited, ts) => {
     if (!editingEntry) return
@@ -711,6 +736,7 @@ export default function App({ appId, token }) {
         navHandleRef.current = null
         setQuickAddDraft(null)
         setLastEntryForQuickAdd(null)
+        closeStaleDraftPrompt()
       })
       navHandleRef.current = handle
       await handle.ready?.catch(() => false)
@@ -724,7 +750,7 @@ export default function App({ appId, token }) {
       setLastEntryForQuickAdd(null)
       setQuickAddDraft({ category: 'strength', activity: '', metrics: {} })
     }
-  }, [closeNestedNav])
+  }, [closeNestedNav, closeStaleDraftPrompt])
 
   const openEditEntry = useCallback(async (entry, nextTab = null) => {
     if (!entry) return
@@ -757,12 +783,29 @@ export default function App({ appId, token }) {
     setDeletePending(id)
   }, [closeNestedNav])
 
-  useEffect(() => {
-    if (editingEntry || deletePending || quickAddDraft || clearSessionPending) return
+  const openClearSessionConfirm = useCallback(async () => {
     closeNestedNav()
-  }, [editingEntry, deletePending, quickAddDraft, clearSessionPending, closeNestedNav])
+    if (window.mobius?.nav?.open) {
+      const handle = window.mobius.nav.open('workout-clear-session', () => {
+        navHandleRef.current = null
+        setClearSessionPending(false)
+      })
+      navHandleRef.current = handle
+      await handle.ready?.catch(() => false)
+      if (navHandleRef.current !== handle) return
+    }
+    setClearSessionPending(true)
+  }, [closeNestedNav])
 
-  useEffect(() => () => closeNestedNav(), [closeNestedNav])
+  useEffect(() => {
+    if (editingEntry || deletePending || quickAddDraft || clearSessionPending || staleDraftPrompt) return
+    closeNestedNav()
+  }, [editingEntry, deletePending, quickAddDraft, clearSessionPending, staleDraftPrompt, closeNestedNav])
+
+  useEffect(() => () => {
+    closeStaleDraftNav()
+    closeNestedNav()
+  }, [closeStaleDraftNav, closeNestedNav])
 
   if (bootStatus === 'loading') {
     return <div className="wk-root"><style>{CSS}</style><div className="wk-loading">Loading…</div></div>
@@ -889,7 +932,7 @@ export default function App({ appId, token }) {
                         onFinish={finishCurrentSession}
                         onDeleteEntry={deleteDraftEntry}
                         onEditEntry={editSessionEntry}
-                        onClear={() => setClearSessionPending(true)}
+                        onClear={openClearSessionConfirm}
                         finishing={finishing}
                       />
                     )}
@@ -967,7 +1010,7 @@ export default function App({ appId, token }) {
           body={`Your current session is from ${staleDraftPrompt.oldDate}. Logging this ${staleDraftPrompt.newDate} entry discards that unfinished draft and starts a new session.`}
           confirmLabel="Discard & log"
           onConfirm={confirmStaleDraftReplace}
-          onCancel={() => setStaleDraftPrompt(null)}
+          onCancel={closeStaleDraftPrompt}
         />
       )}
     </div>

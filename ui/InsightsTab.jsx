@@ -1,4 +1,6 @@
-import React, { useState, useMemo } from 'react'
+import React, {
+  useState, useMemo, useCallback, useEffect, useRef,
+} from 'react'
 import { cardioBests, currentStreak, exerciseDetail, exerciseList, fmtDistance, fmtDuration, fromKg, strengthPRs } from '../logic.js'
 import { categoryStats, weeklyVolumeByCategory } from '../format.js'
 import { CategoryStats } from './CategoryStats.jsx'
@@ -16,11 +18,37 @@ export function InsightsTab({ entries }) {
   const cardio = useMemo(() => cardioBests(entries), [entries])
   const streak = useMemo(() => currentStreak(entries), [entries])
   const [selected, setSelected] = useState(null) // { category, activity }
+  const detailNavHandleRef = useRef(null)
   const detail = useMemo(
     () => (selected ? exerciseDetail(entries, selected.category, selected.activity) : null),
     [entries, selected],
   )
-  const openEx = (category, activity) => setSelected({ category, activity })
+
+  const closeDetailNav = useCallback(() => {
+    try { detailNavHandleRef.current?.close?.() } catch {}
+    detailNavHandleRef.current = null
+  }, [])
+
+  const closeDetail = useCallback(() => {
+    closeDetailNav()
+    setSelected(null)
+  }, [closeDetailNav])
+
+  const openEx = useCallback(async (category, activity) => {
+    closeDetailNav()
+    if (window.mobius?.nav?.open) {
+      const handle = window.mobius.nav.open('workout-exercise-detail', () => {
+        detailNavHandleRef.current = null
+        setSelected(null)
+      })
+      detailNavHandleRef.current = handle
+      await handle.ready?.catch(() => false)
+      if (detailNavHandleRef.current !== handle) return
+    }
+    setSelected({ category, activity })
+  }, [closeDetailNav])
+
+  useEffect(() => () => closeDetailNav(), [closeDetailNav])
 
   if (entries.length === 0) {
     return (
@@ -150,7 +178,7 @@ export function InsightsTab({ entries }) {
         <CategoryStats stats={stats} />
       </div>
 
-      {detail && <ExerciseDetailSheet detail={detail} onClose={() => setSelected(null)} />}
+      {detail && <ExerciseDetailSheet detail={detail} onClose={closeDetail} />}
     </div>
   )
 }
