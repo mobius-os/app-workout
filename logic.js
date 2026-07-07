@@ -1684,6 +1684,7 @@ export function createSessionController(deps) {
     addTombstones = () => {},
     onWriteError = () => {},
     onReadError = () => {},
+    emitSignal = () => {},
     now = () => Date.now(),
   } = deps
 
@@ -1693,6 +1694,10 @@ export function createSessionController(deps) {
   // for the cross-document ordering useDocument cannot see.
   let finishChain = Promise.resolve()
   let disposed = false
+  // Edge-trigger state for the agent_draft_idless signal: emit only on the
+  // transition INTO an id-less draft, so a persistent id-less draft polled every
+  // 5s reports once, not once per tick.
+  let lastLoadWasIdless = false
 
   function throwIfDisposed() {
     if (disposed) throw new Error('controller disposed')
@@ -1708,7 +1713,18 @@ export function createSessionController(deps) {
     throwIfDisposed()
     await currentDoc.refresh()
     throwIfDisposed()
-    return currentDoc.value
+    const value = currentDoc.value
+    // agent_draft_idless {entry_count}: the agent wrote current_session.json
+    // entries with no ids (a prompt-contract violation the app absorbs). Emit
+    // once on the transition into that state so Reflection can flag recurring
+    // prompt-contract drift without the 5s poll inflating the count.
+    const isIdless = currentSessionNeedsIdAssignment(value)
+    if (isIdless && !lastLoadWasIdless) {
+      const entries = Array.isArray(value?.entries) ? value.entries : []
+      emitSignal('agent_draft_idless', { entry_count: entries.length })
+    }
+    lastLoadWasIdless = isIdless
+    return value
   }
 
   // ---- current_session.json: arbitrary transform (quick-add / delete / clear)

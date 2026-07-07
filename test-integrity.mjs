@@ -102,6 +102,7 @@ function makeRealController(store, opts = {}) {
     currentDoc,
     addTombstones: (ids) => { for (const id of ids || []) if (id) tombstones.add(id) },
     onWriteError: (err, source) => { errors.push({ err, source }) },
+    emitSignal: opts.emitSignal || (() => {}),
     now: opts.now || (() => 1780000000000),
   })
   return { controller, entriesDoc, currentDoc, tombstones, errors }
@@ -539,6 +540,34 @@ async function testK_disposedFinishReturnsBenign() {
   pass('disposed finish returns a benign empty commit [no spurious finish error]')
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// Test L — the agent_draft_idless analytics signal is EDGE-triggered: it fires
+// once when an id-less agent draft first appears and does NOT re-fire on every
+// subsequent poll of the same id-less draft (which would inflate Reflection's
+// 24h count on the 5s poller).
+// ════════════════════════════════════════════════════════════════════════════
+async function testL_agentDraftIdlessSignalEdgeTriggered() {
+  const store = makeCasStore({ 'current_session.json': idlessSession('Swim') })
+  const signals = []
+  const { controller } = makeRealController(store, {
+    emitSignal: (name, payload) => signals.push({ name, payload }),
+  })
+  await settle()
+  await controller.load()
+  await settle()
+  const idless = signals.filter((s) => s.name === 'agent_draft_idless')
+  assert.equal(idless.length, 1, 'agent_draft_idless fires once on an id-less draft')
+  assert.equal(idless[0].payload.entry_count, 1)
+  // A second load of the same id-less draft must NOT re-fire (edge-triggered).
+  await controller.load()
+  await settle()
+  assert.equal(
+    signals.filter((s) => s.name === 'agent_draft_idless').length, 1,
+    'no re-fire on re-load of the same id-less draft',
+  )
+  pass('agent_draft_idless is edge-triggered [one signal per id-less episode]')
+}
+
 // ── run ─────────────────────────────────────────────────────────────────────
 await testA_loadNeverClobbersAppend()
 await testB_crossContextCasZeroLoss()
@@ -551,4 +580,5 @@ await testH_nonDurableSurfacesError()
 await testI_loadAndQuickAddSerial()
 await testJ_disposeDuringWrite()
 await testK_disposedFinishReturnsBenign()
+await testL_agentDraftIdlessSignalEdgeTriggered()
 console.log('\nALL INTEGRITY TESTS PASSED')

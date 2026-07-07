@@ -15,10 +15,11 @@ import {
 import { draftFromStoredEntry } from './format.js'
 import {
   appendEntryToCurrentSession, assignSession, createSessionController,
-  createVisiblePoller, currentSessionReady, groupSessions,
-  lastEntryForExercise, makeCurrentSessionDocConfig, makeEntriesDocConfig,
-  migrateLegacyState, normalizeCurrentSession, normalizeEntry,
-  normalizeStoredEntries, reconcileDraftIds, strengthPRs,
+  createVisiblePoller, currentSessionReady, entryBelongsToActiveDraft,
+  groupSessions, lastEntryForExercise, makeCurrentSessionDocConfig,
+  makeEntriesDocConfig, migrateLegacyState, normalizeCurrentSession,
+  normalizeEntry, normalizeStoredEntries, reconcileDraftIds,
+  sessionEntryMissing, strengthPRs,
 } from './logic.js'
 import { SportIcon } from './ui/SportIcon.jsx'
 import { ChatBubbleIcon } from './ui/Icons.jsx'
@@ -179,6 +180,9 @@ export default function App({ appId, token }) {
       // eslint-disable-next-line no-console
       console.error(`${source} failed`, err)
     },
+    // Reflection analytics emitter the controller uses for load-path signals
+    // (agent_draft_idless). Guarded like every other app signal call.
+    emitSignal: (name, payload) => window.mobius?.signal?.(name, payload),
   }), [entriesDocHandle, currentDocHandle, tombstones, bumpSync])
   // Dispose the previous controller on app switch / unmount so a stale enqueued
   // step from it can't advance into the new app.
@@ -345,6 +349,15 @@ export default function App({ appId, token }) {
       source: 'manual',
       confirmed: true,
     })
+    // draft_stale_resumed {age_hours}: the chosen time falls outside the
+    // currently-open draft, so this quick-add starts a FRESH draft rather than
+    // extending the old one. Reflection uses this to separate a UX-expiry problem
+    // (a stale draft left open for hours/days) from ordinary same-session logging.
+    const activeDraft = normalizeCurrentSession(controller.getSession())
+    if (activeDraft && !entryBelongsToActiveDraft(activeDraft, ts)) {
+      const ageHours = Math.max(0, Math.round((Date.now() - activeDraft.startedAt) / 3_600_000))
+      window.mobius?.signal?.('draft_stale_resumed', { age_hours: ageHours })
+    }
     // Enqueue a session-transform intent. The controller re-reads the freshest
     // store value AT PROCESS TIME and merges it with its in-memory truth FIRST
     // (so an agent entry the read missed AND an earlier un-flushed quick-add
@@ -366,7 +379,9 @@ export default function App({ appId, token }) {
     setLastEntryForQuickAdd(null)
     setTab('session')
     retryActionRef.current = null
-    window.mobius?.signal?.('item_created')
+    // item_created {type}: the domain noun is the activity category, so Reflection
+    // can compare manual workout categories against the canonical vocabulary.
+    window.mobius?.signal?.('item_created', { type: entry.category })
   }, [closeNestedNav, controller])
 
   const commitEditedEntry = useCallback((edited, ts) => {
@@ -458,6 +473,9 @@ export default function App({ appId, token }) {
         return normalizeCurrentSession({ ...reconciled, entries: nextEntries }, reconciled.startedAt)
       })
       retryActionRef.current = null
+      // item_updated {type:'draft_entry'}: a worksheet edit landed durably, so
+      // Reflection can see the worksheet doing real completion work, not display.
+      window.mobius?.signal?.('item_updated', { type: 'draft_entry' })
     } catch (err) {
       retryActionRef.current = () => editSessionEntry(entryId, metricsDraft)
       window.mobius?.signal?.('error', {
@@ -488,7 +506,17 @@ export default function App({ appId, token }) {
 
   const finishCurrentSession = useCallback(async () => {
     if (finishInFlightRef.current) return
-    if (!currentSessionReady(currentSession)) return
+    if (!currentSessionReady(currentSession)) {
+      // finish_blocked {missing}: the user reached Finish but a required field is
+      // still empty (an incomplete agent-written entry, or a gap the worksheet
+      // hasn't filled). Reflection uses this to spot prompt/entry-completion gaps.
+      const normalized = normalizeCurrentSession(currentSession)
+      const missing = normalized && normalized.entries.length
+        ? (normalized.entries.map(sessionEntryMissing).find(Boolean) || 'unknown')
+        : 'empty'
+      window.mobius?.signal?.('finish_blocked', { missing })
+      return
+    }
     // Snapshot for the post-commit signals BEFORE the controller clears state.
     const finishedSession = currentSession
     const prevEntries = entries || []
@@ -556,7 +584,12 @@ export default function App({ appId, token }) {
     setChatOpen((open) => {
       // Turning on always spawns a 50/50 split — the divider in the middle —
       // regardless of where a previous drag left it.
-      if (!open) setChatRatio(0.5)
+      if (!open) {
+        setChatRatio(0.5)
+        // chat_opened: fires on a closed→open transition so Reflection can tell
+        // whether the embedded-agent feature is used or quick-add carries the app.
+        window.mobius?.signal?.('chat_opened')
+      }
       return !open
     })
   }, [])
