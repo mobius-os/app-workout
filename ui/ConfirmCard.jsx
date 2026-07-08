@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { CATEGORIES, CATEGORY_KEYS, categoryFamily, fromKg, localDate, normalizeEntry, sessionEntryMissing } from '../logic.js'
 import { metresToDisplay, secondsToDisplay } from '../format.js'
 import { ConfirmModal } from './ConfirmModal.jsx'
@@ -90,6 +90,36 @@ export function ConfirmCard({
   // family actually holds entered data. pendingCategory holds the requested key
   // while that confirm modal is open.
   const [pendingCategory, setPendingCategory] = useState(null)
+
+  // The category-switch confirm is a modal NESTED inside this entry sheet (which
+  // already owns an outer shell back sentinel). Without its own sentinel, an
+  // Android back press while it is open pops the OUTER sentinel and destroys the
+  // whole in-progress entry instead of just dismissing the confirm. Push a
+  // nested sentinel for the confirm's lifetime so back dismisses only the
+  // confirm; the button paths clear pendingCategory, whose effect-cleanup pops
+  // the sentinel (the ref guard prevents a double-pop when back already popped).
+  const catNavRef = useRef(null)
+  useEffect(() => {
+    if (!pendingCategory) return undefined
+    const navOpen = window.mobius?.nav?.open
+    if (typeof navOpen !== 'function') return undefined
+    let handle = null
+    try {
+      handle = navOpen('workout-category-confirm', () => {
+        catNavRef.current = null
+        setPendingCategory(null)
+      })
+    } catch { handle = null }
+    if (!handle) return undefined
+    catNavRef.current = handle
+    handle.ready?.then(undefined, () => { if (catNavRef.current === handle) catNavRef.current = null })
+    return () => {
+      if (catNavRef.current === handle) {
+        catNavRef.current = null
+        try { handle.close?.() } catch {}
+      }
+    }
+  }, [pendingCategory])
 
   // Sets is an integer ≥ 1. A blank or sub-1 typed value clamps to 1 on the way
   // into the commit draft; the input itself stays lenient so the user can clear
