@@ -17,6 +17,7 @@ export const CSS = `
   height: 100%; width: 100%; max-width: 100%;
   overflow: hidden;
   background: var(--bg); color: var(--text); font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
 }
 .wk-scroll {
@@ -27,6 +28,20 @@ export const CSS = `
   overscroll-behavior: contain;
 }
 /* /mobius-ui:Root */
+
+/* mobius-ui:Scrollskin v2 — keep in sync; hidden by default, content stays scrollable. */
+.wk-scroll,
+.wk-sheet-body {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.wk-scroll::-webkit-scrollbar,
+.wk-sheet-body::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+/* /mobius-ui:Scrollskin */
 
 /* mobius-ui:Focus v1 -- shared keyboard focus ring (WCAG 2.4.7); never bare outline:none */
 :where(button,a,input,textarea,select,summary,[role="button"],[tabindex]:not([tabindex="-1"])):focus-visible {
@@ -267,7 +282,7 @@ export const CSS = `
 .wk-current-session.is-live {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 9%, var(--surface)), var(--surface) 60%);
-  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: 0 4px 8px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .wk-current-session-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -391,7 +406,7 @@ export const CSS = `
 .wk-pr-th {
   padding: 8px 6px; text-align: left; font-weight: 600; color: var(--muted);
   border-bottom: 1px solid var(--border);
-  font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  font-size: 12px; letter-spacing: 0;
   user-select: none;
 }
 .wk-pr-th.is-right { text-align: right; }
@@ -426,8 +441,8 @@ export const CSS = `
 }
 .wk-modal {
   width: 100%; max-width: 320px; padding: 20px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.28);
   overscroll-behavior: contain;
 }
 .wk-modal-title { margin: 0 0 6px; font-size: 16px; font-weight: 700; user-select: none; }
@@ -438,7 +453,7 @@ export const CSS = `
 /* mobius-ui:SyncPill v1 — keep in sync; library candidate. */
 .wk-pill {
   padding: 4px 10px; border-radius: 999px;
-  font-size: 12px; font-weight: 600; letter-spacing: 0.2px; white-space: nowrap;
+  font-size: 12px; font-weight: 600; letter-spacing: 0; white-space: nowrap;
   background: transparent; border: 1px solid var(--border); color: var(--muted);
   font-family: var(--font); user-select: none;
 }
@@ -499,8 +514,8 @@ button.wk-pill { cursor: pointer; }
 .wk-sheet {
   width: 100%; max-width: 480px; max-height: 88%;
   display: flex; flex-direction: column; overflow: hidden;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.32);
 }
 .wk-sheet-head {
   flex-shrink: 0;
@@ -519,7 +534,7 @@ button.wk-pill { cursor: pointer; }
   padding: 10px; border: 1px solid var(--border); border-radius: 8px;
   background: color-mix(in srgb, var(--bg) 55%, transparent);
 }
-.wk-rec-label { font-size: 12px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; user-select: none; }
+.wk-rec-label { font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: 0; user-select: none; }
 .wk-rec-value { margin: 3px 0 0; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
 
 .wk-trend-meta {
