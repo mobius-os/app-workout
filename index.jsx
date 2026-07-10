@@ -420,9 +420,11 @@ export default function App({ appId, token }) {
     setLastEntryForQuickAdd(null)
     setTab('session')
     retryActionRef.current = null
-    // item_created {type}: the domain noun is the activity category, so Reflection
-    // can compare manual workout categories against the canonical vocabulary.
-    window.mobius?.signal?.('item_created', { type: entry.category })
+    // item_created {type, source}: the domain noun is the activity category, so
+    // Reflection can compare manual workout categories against the canonical
+    // vocabulary. source:'quick_add' marks the manual strip (vs the embedded
+    // chat) so the owner can weigh whether the chat feature earns its complexity.
+    window.mobius?.signal?.('item_created', { type: entry.category, source: 'quick_add' })
   }, [closeNestedNav, controller, openStaleDraftPrompt])
 
   // The stale-draft prompt confirmed: discard the open (stale) draft, then log the
@@ -436,6 +438,9 @@ export default function App({ appId, token }) {
   // still-present stale draft and re-stamp the entry under the old date (the very
   // corruption this flow exists to prevent).
   const clearThenLog = useCallback(async (pending) => {
+    // Snapshot the stale draft's size before discarding it (same as the manual
+    // clear path) so session_cleared carries the abandonment magnitude.
+    const clearedCount = stampedSessionRef.current?.entries?.length ?? 0
     try {
       await controller.sessionWrite(() => null)
     } catch (err) {
@@ -446,6 +451,9 @@ export default function App({ appId, token }) {
       })
       return
     }
+    // session_cleared: the stale draft was discarded to log a newer-dated entry —
+    // the second abandonment path the launch drop-off metric must cover.
+    window.mobius?.signal?.('session_cleared', { reason: 'stale_replace', entry_count: clearedCount })
     await commitQuickAdd(pending.draft, pending.ts, { skipStaleCheck: true })
   }, [controller, commitQuickAdd])
 
@@ -558,10 +566,17 @@ export default function App({ appId, token }) {
   }, [controller])
 
   const clearCurrentSession = useCallback(async () => {
+    // Snapshot the draft size BEFORE the clear so session_cleared reports how much
+    // was abandoned (the drop-off magnitude), not the post-clear empty state.
+    const clearedCount = stampedSessionRef.current?.entries?.length ?? 0
     try {
       await controller.sessionWrite(() => null)
       closeNestedNav()
       retryActionRef.current = null
+      // session_cleared: the user deliberately abandoned a live draft. Abandonment
+      // is the biggest launch drop-off metric, and the app instruments finishes
+      // and PRs but never this. reason separates it from the stale-draft replace.
+      window.mobius?.signal?.('session_cleared', { reason: 'manual', entry_count: clearedCount })
     } catch (err) {
       retryActionRef.current = clearCurrentSession
       window.mobius?.signal?.('error', {
@@ -871,7 +886,14 @@ export default function App({ appId, token }) {
             role="tab" aria-selected={tab === 'history'} aria-label="History">
             <span className="wk-tab-icon" aria-hidden><SportIcon name="history" size={15} /></span>History
           </button>
-          <button className={`wk-tab-btn${tab === 'insights' ? ' is-active' : ''}`} onClick={() => setTab('insights')}
+          <button className={`wk-tab-btn${tab === 'insights' ? ' is-active' : ''}`}
+            onClick={() => {
+              // insights_viewed: fire only on a real switch INTO Insights (not a
+              // re-tap while already there), so Reflection can tell whether the
+              // analytics/PR surface is used or dead weight.
+              if (tab !== 'insights') window.mobius?.signal?.('insights_viewed', { source: 'tab' })
+              setTab('insights')
+            }}
             role="tab" aria-selected={tab === 'insights'} aria-label="Insights">
             <span className="wk-tab-icon" aria-hidden><SportIcon name="chart-bar" size={15} /></span>Insights
           </button>
