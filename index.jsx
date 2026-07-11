@@ -50,6 +50,16 @@ function getUseDocument() {
   return _useDocument
 }
 
+function chatSessionFrom(session) {
+  const normalized = normalizeCurrentSession(session)
+  if (!normalized) return null
+  return {
+    id: normalized.id,
+    startedAt: normalized.startedAt,
+    localDate: normalized.localDate,
+  }
+}
+
 // useDocument returns a BRAND-NEW handle object on every render (its return is a
 // fresh { value, status, ... } literal). Feeding that ever-changing identity into
 // a dependency array re-runs the memo/effect every render — and for the session
@@ -198,6 +208,14 @@ export default function App({ appId, token }) {
   // fraction of the body height; both persist per app.
   const [chatOpen, setChatOpen] = useState(() => readChatOpen(appId))
   const [chatRatio, setChatRatio] = useState(() => readChatRatio(appId))
+  const [chatSession, setChatSession] = useState(null)
+
+  useEffect(() => {
+    if (!chatOpen) return
+    const active = chatSessionFrom(stampedSession)
+    if (!active) return
+    setChatSession((prev) => (prev?.id === active.id ? prev : active))
+  }, [chatOpen, stampedSession?.id, stampedSession?.localDate, stampedSession?.startedAt])
 
   const quickActions = useMemo(() => [
     { label: 'Log a workout', prompt: 'Log a workout for me.' },
@@ -561,6 +579,8 @@ export default function App({ appId, token }) {
     try {
       await controller.sessionWrite(() => null)
       closeNestedNav()
+      setChatOpen(false)
+      setChatSession(null)
       retryActionRef.current = null
     } catch (err) {
       retryActionRef.current = clearCurrentSession
@@ -652,19 +672,56 @@ export default function App({ appId, token }) {
     syncStatus.refresh()
   }, [syncStatus])
 
-  const toggleChat = useCallback(() => {
-    setChatOpen((open) => {
-      // Turning on always spawns a 50/50 split — the divider in the middle —
-      // regardless of where a previous drag left it.
-      if (!open) {
-        setChatRatio(0.5)
-        // chat_opened: fires on a closed→open transition so Reflection can tell
-        // whether the embedded-agent feature is used or quick-add carries the app.
-        window.mobius?.signal?.('chat_opened')
-      }
-      return !open
-    })
-  }, [])
+  const ensureChatSession = useCallback(async () => {
+    const active = chatSessionFrom(controller.getSession())
+    if (active) {
+      setChatSession(active)
+      return active
+    }
+    const startedAt = Date.now()
+    const draft = normalizeCurrentSession({
+      id: `session-${startedAt}`,
+      startedAt,
+      status: 'active',
+      entries: [],
+    }, startedAt)
+    try {
+      await controller.sessionWrite((base) => normalizeCurrentSession(base) || draft)
+      const next = chatSessionFrom(controller.getSession()) || chatSessionFrom(draft)
+      setChatSession(next)
+      return next
+    } catch (err) {
+      retryActionRef.current = ensureChatSession
+      window.mobius?.signal?.('error', {
+        message: err?.message || 'current session save failed',
+        source: 'chat_session_start',
+      })
+      return null
+    }
+  }, [controller])
+
+  const toggleChat = useCallback(async () => {
+    if (chatOpen) {
+      setChatOpen(false)
+      if (!chatSessionFrom(controller.getSession())) setChatSession(null)
+      return
+    }
+    const sessionForChat = await ensureChatSession()
+    if (!sessionForChat) return
+    // Turning on always spawns a 50/50 split — the divider in the middle —
+    // regardless of where a previous drag left it.
+    setChatRatio(0.5)
+    setChatOpen(true)
+    // chat_opened: fires on a closed→open transition so Reflection can tell
+    // whether the embedded-agent feature is used or quick-add carries the app.
+    window.mobius?.signal?.('chat_opened')
+  }, [chatOpen, controller, ensureChatSession])
+
+  useEffect(() => {
+    if (!chatOpen) return
+    if (chatSessionFrom(stampedSession) || chatSession) return
+    ensureChatSession()
+  }, [chatOpen, chatSession?.id, ensureChatSession, stampedSession?.id])
 
   const beginChatResize = useCallback((event) => {
     event.preventDefault()
@@ -819,7 +876,8 @@ export default function App({ appId, token }) {
   // on, we're on the Session tab, and no full-screen card (edit/quick-add) owns
   // the body. This single flag gates the header toggle-state, the body's split
   // class + vars, and the divider/panel.
-  const chatOnSessionTab = chatOpen && tab === 'session' && !editingEntry && !quickAddDraft
+  const activeChatSession = chatSessionFrom(stampedSession) || chatSession
+  const chatOnSessionTab = !!(chatOpen && activeChatSession && tab === 'session' && !editingEntry && !quickAddDraft)
 
   return (
     <div className="wk-root">
@@ -976,6 +1034,7 @@ export default function App({ appId, token }) {
               appId={appId}
               token={token}
               store={store}
+              session={activeChatSession}
               quickActions={quickActions}
               onEntriesMaybeChanged={() => {
                 loadEntries({ allowMigration: false })
