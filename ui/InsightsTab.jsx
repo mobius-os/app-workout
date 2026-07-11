@@ -46,6 +46,10 @@ export function InsightsTab({ entries }) {
       if (detailNavHandleRef.current !== handle) return
     }
     setSelected({ category, activity })
+    // insights_viewed: opening an exercise-detail sheet is the other way the
+    // analytics surface gets used. No activity name in the payload — a custom
+    // exercise label is user-entered text; the source enum is all Reflection needs.
+    window.mobius?.signal?.('insights_viewed', { source: 'exercise_detail' })
   }, [closeDetailNav])
 
   useEffect(() => () => closeDetailNav(), [closeDetailNav])
