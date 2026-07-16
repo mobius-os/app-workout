@@ -14,7 +14,7 @@ import {
   epley1RM, strengthPRs, cardioBests, migrateLegacyState,
   SESSION_GAP_MS, toKg, summarizeMetrics, extractFirstJsonObject, localDate,
   mergeEntriesForSave, draftsFromParsedPayload, normalizeCurrentSession,
-  sessionEntryMissing, currentSessionReady, entriesFromCurrentSession,
+  sessionEntryMissing, currentSessionMissing, currentSessionReady, entriesFromCurrentSession,
   appendEntryToCurrentSession, mergeCurrentSessions,
   exerciseKey, exerciseList, exerciseDetail, paceSecPerKm, fmtPace,
   lastEntryForExercise, recentExercises, buildSessionRecap,
@@ -277,6 +277,54 @@ test('current session finishes complete mixed activities at the session start ti
   // write). A draft carrying ids must keep them; uid() is only the fallback.
   assert.equal(entries[0].id, 'deadlift')
   assert.equal(entries[1].id, 'swim')
+})
+
+test('set completion mode commits performed sets and drops skipped strength work', () => {
+  const startedAt = 1_700_000_000_000
+  const session = {
+    id: 'session-completion-aware',
+    startedAt,
+    entries: [
+      {
+        id: 'squat', category: 'strength', activity: 'Back squat',
+        metrics: { sets: [
+          { weight_kg: 100, reps: 5, unit: 'kg', completed: true },
+          { weight_kg: 100, reps: 5, unit: 'kg' },
+        ] },
+      },
+      {
+        id: 'bench', category: 'strength', activity: 'Bench press',
+        metrics: { sets: [{ weight_kg: 80, reps: 5, unit: 'kg' }] },
+      },
+      {
+        id: 'run', category: 'running', activity: 'Run',
+        metrics: { duration_s: 1200, distance_m: 3000 },
+      },
+    ],
+  }
+
+  assert.equal(currentSessionReady(session), true)
+  assert.deepEqual(currentSessionMissing(session), [])
+  const committed = entriesFromCurrentSession(session)
+  assert.deepEqual(committed.map((entry) => entry.id), ['squat', 'run'])
+  assert.equal(committed[0].metrics.sets.length, 1)
+  assert.equal(committed[0].metrics.sets[0].completed, true)
+})
+
+test('set completion mode validates only performed sets and still rejects an incomplete checked set', () => {
+  const session = {
+    startedAt: 1_700_000_000_000,
+    entries: [{
+      id: 'squat', category: 'strength', activity: 'Back squat',
+      metrics: { sets: [
+        { weight_kg: null, reps: 5, unit: 'kg', completed: true },
+        { weight_kg: null, reps: null, unit: 'kg' },
+      ] },
+    }],
+  }
+
+  assert.equal(currentSessionReady(session), false)
+  assert.deepEqual(entriesFromCurrentSession(session), [])
 })
 
 test('current session requires duration or distance for cardio drafts', () => {

@@ -314,12 +314,6 @@ export const CSS = `
   .wk-live-dot { animation: wk-live-pulse 2.2s ease-in-out infinite; }
 }
 .wk-current-session-sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; user-select: none; }
-.wk-current-session-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  padding: 10px 12px 0;
-}
 .wk-rest-timer {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin: 10px 12px 0; padding: 9px 10px;
@@ -334,31 +328,6 @@ export const CSS = `
   min-width: 44px; min-height: 36px; padding: 6px 9px; border: 0; border-radius: 8px;
   background: var(--surface); color: var(--accent);
   font-family: var(--font); font-size: 12px; font-weight: 800; cursor: pointer;
-}
-.wk-session-stat {
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 78%, var(--bg));
-}
-.wk-session-stat-value {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 850;
-  font-variant-numeric: tabular-nums;
-}
-.wk-session-stat-label {
-  display: block;
-  margin-top: 3px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  user-select: none;
 }
 .wk-current-session-list { padding: 10px 12px 4px; }
 .wk-current-session-empty { padding: 18px 14px; color: var(--muted); font-size: 13px; }
@@ -542,6 +511,13 @@ export const CSS = `
   border: 1px solid var(--border); border-radius: 9px;
   background: var(--surface2, var(--surface)); color: var(--accent);
   font: 700 12px/1.2 var(--font); cursor: pointer;
+}
+.wk-more-options {
+  color: var(--text); font-size: 12px;
+}
+.wk-more-options summary {
+  min-height: 44px; display: flex; align-items: center;
+  color: var(--accent); font-weight: 750; cursor: pointer; user-select: none;
 }
 .wk-activity-option {
   min-width: 0;
@@ -862,6 +838,9 @@ button.wk-pill { cursor: pointer; }
     width: 100%;
     justify-content: flex-start;
   }
+  .wk-session-side .wk-quick-add-label .wk-quick-add-btn {
+    width: auto; margin-left: auto; justify-content: center;
+  }
   .wk-confirm-card { padding: 18px; }
 }
 
@@ -875,6 +854,15 @@ button.wk-pill { cursor: pointer; }
   .wk-worksheet-row { grid-template-columns: 44px 18px minmax(42px, 1fr) 10px minmax(42px, 1fr) 20px; gap: 4px; }
   .wk-worksheet-row .wk-input { min-height: 44px; padding: 8px 5px; text-align: center; }
   .wk-set-previous { margin-left: 66px; margin-right: 24px; }
+  .wk-activity-results { max-height: none; overflow: visible; overscroll-behavior: auto; }
+}
+
+@media (max-width: 839px) {
+  .wk-current-session-head {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 /* mobius-ui:ReducedMotion v1 -- honor the OS reduce-motion setting */

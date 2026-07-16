@@ -802,13 +802,42 @@ export function sessionEntryMissing(entry) {
 
 export function currentSessionReady(session) {
   const normalized = normalizeCurrentSession(session)
-  return !!(normalized && normalized.entries.length > 0 && normalized.entries.every((entry) => !sessionEntryMissing(entry)))
+  if (!normalized) return false
+  const entries = sessionEntriesForFinish(normalized)
+  return entries.length > 0 && entries.every((entry) => !sessionEntryMissing(entry))
+}
+
+// Completion is opt-in for backwards compatibility. Older sessions—and users
+// who never tap a set checkbox—commit every filled set exactly as before. Once
+// any strength set is checked, checkboxes become the source of truth for the
+// whole session: unchecked planned work is not written to History or counted as
+// a PR, and an exercise with no completed sets is treated as skipped.
+function sessionEntriesForFinish(normalized) {
+  const completionMode = normalized.entries.some((entry) => (
+    categoryFamily(entry.category) === 'strength' &&
+    (entry.metrics?.sets || []).some((set) => set.completed === true)
+  ))
+  if (!completionMode) return normalized.entries
+  return normalized.entries.flatMap((entry) => {
+    if (categoryFamily(entry.category) !== 'strength') return [entry]
+    const completedSets = (entry.metrics?.sets || []).filter((set) => set.completed === true)
+    if (completedSets.length === 0) return []
+    return [{ ...entry, metrics: { ...entry.metrics, sets: completedSets } }]
+  })
+}
+
+export function currentSessionMissing(session) {
+  const normalized = normalizeCurrentSession(session)
+  if (!normalized) return ['activity']
+  return sessionEntriesForFinish(normalized).map(sessionEntryMissing).filter(Boolean)
 }
 
 export function entriesFromCurrentSession(session) {
   const normalized = normalizeCurrentSession(session)
-  if (!normalized || !currentSessionReady(normalized)) return []
-  return normalized.entries.map((entry, index) => ({
+  if (!normalized) return []
+  const entries = sessionEntriesForFinish(normalized)
+  if (entries.length === 0 || entries.some((entry) => sessionEntryMissing(entry))) return []
+  return entries.map((entry, index) => ({
     ...entry,
     // Preserve the draft entry's stable id. Committing a draft must be
     // idempotent: if Finish is retried after entries.json was written durably

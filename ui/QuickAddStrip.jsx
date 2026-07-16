@@ -3,12 +3,12 @@ import { recentExercises } from '../logic.js'
 import { SportIcon } from './SportIcon.jsx'
 
 export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
-  const recents = useMemo(() => recentExercises(entries, 6), [entries])
+  const recents = useMemo(() => recentExercises(entries, 3), [entries])
   if (!entries || entries.length === 0) {
     return (
       <div className="wk-quick-add is-empty">
         <div className="wk-quick-add-label">
-          <span>Log activity</span>
+          <span>Add activity</span>
         </div>
         <div className="wk-quick-chip-row">
           <button className="wk-quick-add-btn" onClick={() => onQuickAdd(null, null)}
@@ -27,7 +27,7 @@ export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
   return (
     <div className="wk-quick-add">
       <div className="wk-quick-add-label">
-        <span>Log activity</span>
+        <span>Add activity</span>
         <button className="wk-quick-add-btn" style={{ marginLeft: 0 }}
           onClick={() => onQuickAdd(null, null)} aria-label="Browse activity library">Browse</button>
       </div>
@@ -37,7 +37,7 @@ export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
             key={ex.key}
             className="wk-quick-chip"
             onClick={() => onQuickAdd(ex, entries)}
-            aria-label={`Quick-add ${ex.activity}`}
+            aria-label={`Add ${ex.activity} to session`}
           >
             <SportIcon name={ex.icon} color={ex.color} size={15} />
             {ex.activity}

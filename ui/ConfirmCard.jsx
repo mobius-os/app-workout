@@ -11,7 +11,7 @@ import { SportIcon } from './SportIcon.jsx'
 export function ConfirmCard({
   draft, ambiguous, clarification, onCommit, onCancel, position = 1, total = 1,
   initialTs = Date.now(), title = null, commitLabel = null, helperText = null,
-  lastEntry = null,
+  lastEntry = null, collapseTiming = false,
 }) {
   const [category, setCategory] = useState(draft.category)
   const [activity, setActivity] = useState(draft.activity)
@@ -32,7 +32,7 @@ export function ConfirmCard({
   const activityResults = useMemo(
     () => searchActivityLibrary(activitySearch, {
       group: activityGroup,
-      limit: activitySearch.trim() ? 48 : showAllActivities ? 96 : 12,
+      limit: activitySearch.trim() ? 48 : showAllActivities ? 96 : 6,
     }),
     [activityGroup, activitySearch, showAllActivities],
   )
@@ -266,6 +266,27 @@ export function ConfirmCard({
     )
   }
 
+  const timingFields = (
+    <div className="wk-grid-2">
+      <div>
+        <label className="wk-label">Date</label>
+        <input
+          className="wk-input" type="date" value={dateValue}
+          onChange={(e) => setDateValue(e.target.value)}
+          aria-label="Entry date"
+        />
+      </div>
+      <div>
+        <label className="wk-label">Time</label>
+        <input
+          className="wk-input" type="time" value={timeValue}
+          onChange={(e) => setTimeValue(e.target.value)}
+          aria-label="Entry time"
+        />
+      </div>
+    </div>
+  )
+
   return (
     <div className={`wk-card wk-confirm-card${ambiguous ? ' is-ambiguous' : ''}`}>
       <h2 className="wk-card-title">
@@ -299,7 +320,7 @@ export function ConfirmCard({
           placeholder="Search activities"
           enterKeyHint="search" autoComplete="off" autoCorrect="off" spellCheck="false"
         />
-        <div className="wk-activity-group-row" role="tablist" aria-label="Activity groups">
+        <div className="wk-activity-group-row" role="group" aria-label="Activity groups">
           {ACTIVITY_GROUPS.map((group) => (
             <button
               key={group.key}
@@ -309,8 +330,7 @@ export function ConfirmCard({
                 setActivityGroup(group.key)
                 setShowAllActivities(false)
               }}
-              role="tab"
-              aria-selected={activityGroup === group.key}
+              aria-pressed={activityGroup === group.key}
             >
               <span>{group.label}</span>
               <span className="wk-activity-group-count">{activityGroupCounts[group.key] || 0}</span>
@@ -318,7 +338,7 @@ export function ConfirmCard({
           ))}
         </div>
         <div className="wk-activity-result-count" aria-live="polite">{resultCountLabel}</div>
-        <div className="wk-activity-results" role="listbox" aria-label="Activity results">
+        <div className="wk-activity-results" aria-label="Activity results">
           {activityResults.map((item) => {
             const active = item.name === activity && item.category === category
             return (
@@ -327,8 +347,7 @@ export function ConfirmCard({
                 type="button"
                 className={`wk-activity-option${active ? ' is-active' : ''}`}
                 onClick={() => requestActivity(item)}
-                role="option"
-                aria-selected={active}
+                aria-pressed={active}
               >
                 <span className="wk-activity-option-icon" aria-hidden>
                   <SportIcon name={item.icon} color={item.color} size={17} />
@@ -373,24 +392,13 @@ export function ConfirmCard({
       </div>
 
       <div className="wk-spacer-12" />
-      <div className="wk-grid-2">
-        <div>
-          <label className="wk-label">Date</label>
-          <input
-            className="wk-input" type="date" value={dateValue}
-            onChange={(e) => setDateValue(e.target.value)}
-            aria-label="Entry date"
-          />
-        </div>
-        <div>
-          <label className="wk-label">Time</label>
-          <input
-            className="wk-input" type="time" value={timeValue}
-            onChange={(e) => setTimeValue(e.target.value)}
-            aria-label="Entry time"
-          />
-        </div>
-      </div>
+      {collapseTiming ? (
+        <details className="wk-more-options">
+          <summary>More options</summary>
+          <div className="wk-spacer-10" />
+          {timingFields}
+        </details>
+      ) : timingFields}
 
       <div className="wk-spacer-14" />
       {fam === 'strength' ? (

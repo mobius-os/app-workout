@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import {
-  categoryFamily, currentSessionReady, fmtDistance, fmtDuration,
-  lastEntryForExercise, normalizeCurrentSession, sessionEntryMissing,
+  categoryFamily, currentSessionMissing, currentSessionReady, fmtDistance, fmtDuration,
+  lastEntryForExercise, normalizeCurrentSession,
 } from '../logic.js'
 import { SessionDraftCard } from './SessionDraftCard.jsx'
 
@@ -38,7 +38,7 @@ export function CurrentSessionPanel({
   const normalized = useMemo(() => normalizeCurrentSession(session), [session])
   const entries = normalized?.entries || []
   const ready = currentSessionReady(normalized) && !finishing
-  const missing = entries.map(sessionEntryMissing).filter(Boolean)
+  const missing = currentSessionMissing(normalized)
   // Ticking clock makes the card read as live: elapsed time since startedAt,
   // refreshed every 30s (cheap; unmounts with the panel when no session).
   const [now, setNow] = useState(() => Date.now())
@@ -72,7 +72,13 @@ export function CurrentSessionPanel({
     ? fmtDuration((now - normalized.startedAt) / 1000)
     : null
   const workSummary = useMemo(() => sessionWorkSummary(entries), [entries])
-  const statusLabel = finishing ? 'Saving' : ready ? 'Ready' : missing.length > 0 ? `${missing.length} missing` : 'Draft'
+  const sessionSubtitle = entries.length > 0
+    ? [
+        `${entries.length} ${entries.length === 1 ? 'activity' : 'activities'}`,
+        workSummary,
+        elapsed,
+      ].filter(Boolean).join(' · ')
+    : 'No activities yet'
   return (
     <section className="wk-current-session is-live" aria-label="Current session">
       <div className="wk-current-session-head">
@@ -81,9 +87,7 @@ export function CurrentSessionPanel({
             <span className="wk-live-dot" aria-hidden />Live session
           </h2>
           <p className="wk-current-session-sub">
-            {entries.length > 0
-              ? `${entries.length} ${entries.length === 1 ? 'activity' : 'activities'}${elapsed ? ` · ${elapsed}` : ''}`
-              : 'No activities yet'}
+            {finishing ? 'Saving session…' : sessionSubtitle}
           </p>
         </div>
         <div className="wk-current-session-actions">
@@ -108,22 +112,6 @@ export function CurrentSessionPanel({
           </button>
         </div>
       </div>
-      {entries.length > 0 && (
-        <div className="wk-current-session-stats" aria-label="Session summary">
-          <div className="wk-session-stat">
-            <span className="wk-session-stat-value">{entries.length}</span>
-            <span className="wk-session-stat-label">Activities</span>
-          </div>
-          <div className="wk-session-stat">
-            <span className="wk-session-stat-value">{workSummary}</span>
-            <span className="wk-session-stat-label">Work</span>
-          </div>
-          <div className="wk-session-stat">
-            <span className="wk-session-stat-value">{statusLabel}</span>
-            <span className="wk-session-stat-label">Status</span>
-          </div>
-        </div>
-      )}
       {restTimer && (
         <div className="wk-rest-timer" aria-label={`Rest timer ${restClock(restRemaining)} remaining`}>
           <div>

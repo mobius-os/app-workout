@@ -15,11 +15,10 @@ import {
 import { draftFromStoredEntry } from './format.js'
 import {
   appendEntryToCurrentSession, assignSession, buildSessionRecap, createSessionController,
-  createVisiblePoller, currentSessionReady, entryBelongsToActiveDraft,
+  createVisiblePoller, currentSessionMissing, currentSessionReady, entryBelongsToActiveDraft,
   groupSessions, lastEntryForExercise, localDate, makeCurrentSessionDocConfig,
   makeEntriesDocConfig, migrateLegacyState, normalizeCurrentSession,
-  normalizeEntry, normalizeStoredEntries, reconcileDraftIds,
-  sessionEntryMissing, strengthPRs,
+  normalizeEntry, normalizeStoredEntries, reconcileDraftIds, strengthPRs,
 } from './logic.js'
 import { SportIcon } from './ui/SportIcon.jsx'
 import { ChatBubbleIcon } from './ui/Icons.jsx'
@@ -199,10 +198,20 @@ export default function App({ appId, token }) {
   const [chatOpen, setChatOpen] = useState(() => readChatOpen(appId))
   const [chatRatio, setChatRatio] = useState(() => readChatRatio(appId))
 
+  const selectTab = useCallback((nextTab) => {
+    if (nextTab === 'insights' && tab !== 'insights') {
+      window.mobius?.signal?.('insights_viewed', { source: 'tab' })
+    }
+    setTab(nextTab)
+    requestAnimationFrame(() => {
+      bodyRef.current?.querySelector('.wk-scroll')?.scrollTo({ top: 0 })
+    })
+  }, [tab])
+
   const quickActions = useMemo(() => [
-    { label: 'Repeat my last workout', prompt: 'Build today’s current session from my most recent workout. Keep it editable and do not commit it yet.' },
-    { label: 'Build today’s workout', prompt: 'Build a workout for today from my recent training, goals, constraints, and what looks undertrained. Put the plan in the current session draft.' },
-    { label: 'What needs attention?', prompt: 'Review my recent workout history and tell me what is undertrained, plateauing, or ready to progress. Keep it concise and actionable.' },
+    { label: 'Repeat my last workout', prompt: 'Copy my most recent logged session exactly into today’s editable draft. Reset set completion, do not progress loads, and do not commit it.' },
+    { label: 'Build today’s workout', prompt: 'Build an editable workout for today using only my stated goals, time, equipment, and logged history. Ask one question if a key constraint is missing; never invent loads.' },
+    { label: 'Adapt this workout', prompt: 'Adapt my current editable workout to the constraint I give you. Preserve unaffected work, keep it concise, and do not commit it.' },
   ], [])
 
   const [editingEntry, setEditingEntry] = useState(null)
@@ -609,7 +618,7 @@ export default function App({ appId, token }) {
       // hasn't filled). Reflection uses this to spot prompt/entry-completion gaps.
       const normalized = normalizeCurrentSession(currentSession)
       const missing = normalized && normalized.entries.length
-        ? (normalized.entries.map(sessionEntryMissing).find(Boolean) || 'unknown')
+        ? (currentSessionMissing(normalized)[0] || 'unknown')
         : 'empty'
       window.mobius?.signal?.('finish_blocked', { missing })
       return
@@ -887,24 +896,18 @@ export default function App({ appId, token }) {
       </div>
 
       {!editingEntry && !quickAddDraft && (
-        <nav className="wk-tabbar" role="tablist" aria-label="Activity tabs">
-          <button className={`wk-tab-btn${tab === 'session' ? ' is-active' : ''}`} onClick={() => setTab('session')}
-            role="tab" aria-selected={tab === 'session'} aria-label="Session">
+        <nav className="wk-tabbar" aria-label="Workout sections">
+          <button className={`wk-tab-btn${tab === 'session' ? ' is-active' : ''}`} onClick={() => selectTab('session')}
+            aria-current={tab === 'session' ? 'page' : undefined} aria-label="Session">
             <span className="wk-tab-icon" aria-hidden><SportIcon name="stopwatch" size={15} /></span>Session
           </button>
-          <button className={`wk-tab-btn${tab === 'history' ? ' is-active' : ''}`} onClick={() => setTab('history')}
-            role="tab" aria-selected={tab === 'history'} aria-label="History">
+          <button className={`wk-tab-btn${tab === 'history' ? ' is-active' : ''}`} onClick={() => selectTab('history')}
+            aria-current={tab === 'history' ? 'page' : undefined} aria-label="History">
             <span className="wk-tab-icon" aria-hidden><SportIcon name="history" size={15} /></span>History
           </button>
           <button className={`wk-tab-btn${tab === 'insights' ? ' is-active' : ''}`}
-            onClick={() => {
-              // insights_viewed: fire only on a real switch INTO Insights (not a
-              // re-tap while already there), so Reflection can tell whether the
-              // analytics/PR surface is used or dead weight.
-              if (tab !== 'insights') window.mobius?.signal?.('insights_viewed', { source: 'tab' })
-              setTab('insights')
-            }}
-            role="tab" aria-selected={tab === 'insights'} aria-label="Insights">
+            onClick={() => selectTab('insights')}
+            aria-current={tab === 'insights' ? 'page' : undefined} aria-label="Insights">
             <span className="wk-tab-icon" aria-hidden><SportIcon name="chart-bar" size={15} /></span>Insights
           </button>
         </nav>
@@ -942,6 +945,7 @@ export default function App({ appId, token }) {
                 title="Add exercise"
                 commitLabel="Add to session"
                 helperText="Set the details now or finish them in the worksheet. It reaches History when you finish the session."
+                collapseTiming
                 lastEntry={lastEntryForQuickAdd}
                 onCommit={commitQuickAdd}
                 onCancel={() => {
