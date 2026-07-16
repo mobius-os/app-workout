@@ -23,7 +23,7 @@ export const CSS = `
 .wk-scroll {
   flex: 1; min-height: 0;
   overflow-y: auto; overflow-x: hidden;
-  padding: 14px 16px 16px;
+  padding: 16px;
   word-break: break-word; overflow-wrap: anywhere;
   overscroll-behavior: contain;
 }
@@ -50,8 +50,8 @@ export const CSS = `
 }
 /* /mobius-ui:Focus */
 
-/* Web cap so the column doesn't sprawl on desktop while staying mobile-first. */
-.wk-inner { width: 100%; max-width: 720px; margin-left: auto; margin-right: auto; }
+/* Web cap so desktop gets a proper working canvas while mobile stays direct. */
+.wk-inner { width: 100%; max-width: 1040px; margin-left: auto; margin-right: auto; }
 
 /* mobius-ui:Header v1 — keep in sync; library candidate. Diverge below the marker only. */
 .wk-header {
@@ -72,7 +72,7 @@ export const CSS = `
 .wk-header-actions { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
 /* Base border so the pressed-state border-color below is visible (the shared
    .wk-icon-btn is borderless). */
-.wk-chat-toggle { border: 1px solid transparent; }
+.wk-chat-toggle { width: 44px; height: 44px; border: 1px solid transparent; }
 .wk-chat-toggle[aria-pressed="true"] {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface));
   color: var(--accent);
@@ -190,6 +190,11 @@ export const CSS = `
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 12px; padding: 16px; margin-bottom: 14px;
 }
+.wk-confirm-card {
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+}
 .wk-card.is-ambiguous { border-color: var(--accent); }
 .wk-card-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; }
 .wk-card-sub { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
@@ -237,9 +242,9 @@ export const CSS = `
    rows: the icon names the sport, the meta line carries the key numbers. */
 .wk-entry-card {
   display: flex; align-items: center; gap: 10px;
-  padding: 9px 10px; margin-bottom: 6px;
-  background: color-mix(in srgb, var(--surface) 94%, #000);
-  border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px; margin-bottom: 8px;
+  background: color-mix(in srgb, var(--surface) 96%, var(--bg));
+  border: 1px solid var(--border); border-radius: 10px;
 }
 .wk-entry-card.is-draft { background: color-mix(in srgb, var(--bg) 62%, var(--surface)); }
 .wk-entry-icon {
@@ -272,21 +277,25 @@ export const CSS = `
 }
 .wk-icon-btn.is-accent { color: var(--accent); }
 
+.wk-sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
 /* Current-session draft panel — app-specific. The is-live treatment (accent
    wash + pulsing dot + ticking elapsed time) makes the in-progress workout
    read as the one live thing on the screen. */
 .wk-current-session {
   margin-bottom: 14px; overflow: hidden;
-  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
 }
 .wk-current-session.is-live {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 9%, var(--surface)), var(--surface) 60%);
-  box-shadow: 0 4px 8px color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 }
 .wk-current-session-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 12px; border-bottom: 1px solid var(--border);
+  padding: 14px; border-bottom: 1px solid var(--border);
 }
 .wk-current-session-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .wk-current-session-title {
@@ -305,11 +314,57 @@ export const CSS = `
   .wk-live-dot { animation: wk-live-pulse 2.2s ease-in-out infinite; }
 }
 .wk-current-session-sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; user-select: none; }
-.wk-current-session-list { padding: 8px 10px 2px; }
-.wk-current-session-empty { padding: 16px 12px; color: var(--muted); font-size: 13px; }
+.wk-current-session-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+.wk-rest-timer {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 10px 12px 0; padding: 9px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--text);
+}
+.wk-rest-label { margin-right: 8px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.wk-rest-value { font-size: 18px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.wk-rest-actions { display: flex; gap: 4px; }
+.wk-rest-actions button {
+  min-width: 44px; min-height: 36px; padding: 6px 9px; border: 0; border-radius: 8px;
+  background: var(--surface); color: var(--accent);
+  font-family: var(--font); font-size: 12px; font-weight: 800; cursor: pointer;
+}
+.wk-session-stat {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 78%, var(--bg));
+}
+.wk-session-stat-value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+.wk-session-stat-label {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  user-select: none;
+}
+.wk-current-session-list { padding: 10px 12px 4px; }
+.wk-current-session-empty { padding: 18px 14px; color: var(--muted); font-size: 13px; }
 .wk-current-session-missing { margin: 0; padding: 0 12px 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .wk-finish-btn {
-  min-height: 44px; padding: 10px 12px; border-radius: 8px;
+  min-height: 44px; padding: 10px 14px; border-radius: 8px;
   border: none; background: var(--accent); color: var(--accent-fg);
   font-family: var(--font); font-size: 13px; font-weight: 800;
   white-space: nowrap; cursor: pointer;
@@ -358,13 +413,45 @@ export const CSS = `
    summary. A strength row is [# reps × weight unit]; cardio/other rows are
    labelled fields. Incomplete rows/entries get the danger accent so the owner
    sees exactly what still blocks Finish. */
-.wk-entry-card.is-draft { align-items: flex-start; }
+.wk-entry-card.is-draft {
+  display: grid; grid-template-columns: 32px minmax(0, 1fr) 32px;
+  align-items: flex-start;
+}
+.wk-entry-card.is-draft .wk-entry-body { display: contents; }
+.wk-entry-card.is-draft .wk-entry-top { grid-column: 2; align-self: center; }
+.wk-entry-card.is-draft .wk-entry-actions { grid-column: 3; grid-row: 1; }
+.wk-entry-card.is-draft .wk-worksheet,
+.wk-entry-card.is-draft .wk-entry-meta { grid-column: 1 / -1; }
 .wk-entry-card.is-draft .wk-entry-icon { margin-top: 2px; }
 .wk-entry-card.is-incomplete { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .wk-worksheet { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.wk-set-block {
+  padding: 6px; border-radius: 9px;
+  background: color-mix(in srgb, var(--bg) 52%, transparent);
+}
+.wk-set-block.is-complete {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
 .wk-worksheet-row {
-  display: grid; grid-template-columns: 20px 1fr 14px 1fr 22px;
+  display: grid; grid-template-columns: 36px 20px minmax(48px, 1fr) 12px minmax(48px, 1fr) 22px;
   align-items: center; gap: 6px;
+}
+.wk-set-check {
+  width: 36px; height: 36px; padding: 0; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--accent);
+  font-family: var(--font); font-size: 16px; font-weight: 900; cursor: pointer;
+}
+.wk-set-check[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+.wk-set-previous {
+  display: flex; justify-content: space-between; gap: 8px;
+  margin: 4px 28px 0 62px; color: var(--muted);
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.wk-use-last {
+  min-height: 32px; margin-left: 7px; padding: 4px 8px;
+  border: 0; border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
+  font-family: var(--font); font-size: 11px; font-weight: 800; cursor: pointer;
 }
 .wk-worksheet-row.is-incomplete .wk-input {
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
@@ -377,17 +464,115 @@ export const CSS = `
   padding: 0; color: var(--danger); font-weight: 600;
 }
 
-/* Category chips for the confirm card — app-specific (per-category accent inline). */
-.wk-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.wk-chip {
-  display: flex; align-items: center; gap: 6px;
-  min-height: 44px; padding: 8px 12px; border-radius: 999px;
-  border: 1px solid var(--border); background: transparent; color: var(--muted);
-  font-family: var(--font); font-size: 13px; font-weight: 600; cursor: pointer;
-  touch-action: manipulation; user-select: none;
+/* Activity library picker — manual logging is search-first over a broad list,
+   while the storage category stays an internal analytics detail. */
+.wk-activity-picker {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--bg) 44%, var(--surface));
 }
+.wk-activity-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 6px;
+}
+.wk-activity-selected {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 28px; padding: 4px 8px; border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px; font-weight: 700;
+  white-space: nowrap;
+}
+.wk-activity-search { font-size: 15px; }
+.wk-activity-group-row {
+  display: flex; gap: 6px; overflow-x: auto;
+  margin: 10px -2px 8px; padding: 0 2px 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.wk-activity-group-row::-webkit-scrollbar { display: none; }
+.wk-activity-group {
+  flex: 0 0 auto;
+  min-height: 34px; padding: 7px 10px; border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent; color: var(--muted);
+  font-family: var(--font); font-size: 12px; font-weight: 800;
+  display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer; touch-action: manipulation; user-select: none;
+}
+.wk-activity-group.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  color: var(--text);
+}
+.wk-activity-group-count {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 62%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.wk-activity-group.is-active .wk-activity-group-count {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  color: var(--text);
+}
+.wk-activity-result-count {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  user-select: none;
+}
+.wk-activity-results {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px;
+  max-height: 284px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+.wk-activity-option {
+  min-width: 0;
+  min-height: 48px;
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  font-family: var(--font);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+}
+.wk-activity-option.is-active {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.wk-activity-option.is-custom {
+  border-style: dashed;
+}
+.wk-activity-option-icon {
+  width: 30px; height: 30px; flex: 0 0 30px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+.wk-activity-option-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.wk-activity-option-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; font-weight: 800;
+}
+.wk-activity-option-meta { font-size: 11px; font-weight: 700; color: var(--muted); }
 @media (prefers-reduced-motion: no-preference) {
-  .wk-chip:active { opacity: 0.8; transform: scale(0.96); }
+  .wk-activity-option:active,
+  .wk-activity-group:active { opacity: 0.78; transform: scale(0.98); }
 }
 
 /* Chart / insight cards — app-specific. */
@@ -561,24 +746,79 @@ button.wk-pill { cursor: pointer; }
 .wk-btn-row-finish { justify-content: space-between; align-items: center; margin-top: 4px; }
 .wk-min44 { min-width: 44px; }
 
+/* Session tab layout — one column on phones, current workout + library rail on web. */
+.wk-session-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.wk-session-layout.is-empty {
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.wk-session-main,
+.wk-session-side { min-width: 0; }
+.wk-session-recap {
+  margin-bottom: 14px; padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  color: var(--text);
+}
+.wk-session-recap-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.wk-session-recap-head > div { display: flex; flex-direction: column; gap: 2px; }
+.wk-session-recap-head strong { font-size: 14px; }
+.wk-session-recap-head span { color: var(--muted); font-size: 12px; }
+.wk-session-recap-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.wk-recap-row { display: flex; align-items: center; gap: 9px; padding: 7px 0; }
+.wk-recap-row + .wk-recap-row { border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.wk-recap-icon {
+  width: 32px; height: 32px; flex: 0 0 32px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.wk-recap-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.wk-recap-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.wk-recap-copy small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.wk-recap-row.is-pr .wk-recap-copy small,
+.wk-recap-row.is-up .wk-recap-copy small { color: var(--text); }
+
+.wk-coach-cta {
+  width: 100%; min-height: 52px; margin-top: 10px; padding: 8px 10px;
+  display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 9px;
+  border: 0; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--text);
+  text-align: left; font-family: var(--font); cursor: pointer;
+}
+.wk-coach-cta-icon {
+  width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; background: var(--surface); color: var(--accent);
+}
+.wk-coach-cta > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.wk-coach-cta strong { font-size: 13px; }
+.wk-coach-cta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+
 /* Quick-add strip — recent exercise chips on the Log tab so a repeat set is one tap. */
 .wk-quick-add {
   margin-bottom: 14px;
-  padding: 12px;
+  padding: 14px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
 }
+.wk-quick-add.is-empty { text-align: center; }
 .wk-quick-add-label {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin-bottom: 8px; font-size: 12px; font-weight: 700; color: var(--muted);
+  margin-bottom: 10px; font-size: 13px; font-weight: 800; color: var(--text);
   user-select: none;
 }
+.wk-quick-add.is-empty .wk-quick-add-label { justify-content: center; }
 .wk-quick-chip {
   display: inline-flex; align-items: center; gap: 6px;
-  min-height: 44px; padding: 6px 12px; border-radius: 999px;
-  border: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 65%, transparent);
+  min-height: 42px; padding: 7px 11px; border-radius: 10px;
+  border: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text); font-family: var(--font); font-size: 13px; font-weight: 600;
   cursor: pointer; touch-action: manipulation; user-select: none;
-  white-space: nowrap;
+  white-space: nowrap; max-width: 100%;
 }
 @media (prefers-reduced-motion: no-preference) {
   .wk-quick-chip:active { opacity: 0.75; transform: scale(0.96); }
@@ -587,14 +827,48 @@ button.wk-pill { cursor: pointer; }
   display: flex; gap: 6px; flex-wrap: wrap;
 }
 .wk-quick-add-btn {
-  min-height: 44px; padding: 6px 14px; border-radius: 999px;
-  border: 1px dashed var(--border); background: transparent;
+  min-height: 40px; padding: 7px 13px; border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
   color: var(--accent); font-family: var(--font); font-size: 13px; font-weight: 700;
   cursor: pointer; touch-action: manipulation; user-select: none;
   white-space: nowrap;
 }
 @media (prefers-reduced-motion: no-preference) {
   .wk-quick-add-btn:active { opacity: 0.75; }
+}
+
+@media (min-width: 840px) {
+  .wk-scroll { padding: 18px 22px 22px; }
+  .wk-session-layout:not(.is-empty) {
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+    gap: 18px;
+  }
+  .wk-session-side {
+    position: sticky;
+    top: 0;
+  }
+  .wk-session-side .wk-quick-chip-row {
+    flex-direction: column;
+  }
+  .wk-session-side .wk-quick-chip,
+  .wk-session-side .wk-quick-add-btn {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .wk-confirm-card { padding: 18px; }
+}
+
+@media (max-width: 420px) {
+  .wk-current-session-head { align-items: flex-start; }
+  .wk-current-session-actions { flex-direction: column-reverse; align-items: flex-end; gap: 2px; }
+  .wk-entry-card.is-draft { padding: 9px; }
+  .wk-entry-card.is-draft .wk-entry-time { font-size: 0; }
+  .wk-entry-card.is-draft .wk-use-last { margin-left: 4px; font-size: 11px; }
+  .wk-entry-card.is-draft .wk-entry-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wk-worksheet-row { grid-template-columns: 36px 18px minmax(42px, 1fr) 10px minmax(42px, 1fr) 20px; gap: 4px; }
+  .wk-worksheet-row .wk-input { min-height: 40px; padding: 8px 5px; text-align: center; }
+  .wk-set-previous { margin-left: 58px; margin-right: 24px; }
 }
 
 /* mobius-ui:ReducedMotion v1 -- honor the OS reduce-motion setting */

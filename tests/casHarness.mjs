@@ -104,6 +104,13 @@ export function makeCasStore(initial = {}) {
       return rec ? { value: clone(rec.value), version: rec.version } : { value: null, version: null }
     },
 
+    // Public runtime contract. Keep the underscored method as the test seam so
+    // race tests can park a read after it captures a snapshot; delegating here
+    // means those overrides still exercise createUseDocument's real CAS path.
+    async getWithVersion(path, kind) {
+      return store._getWithVersion(path, kind)
+    },
+
     async get(path) {
       const rec = files.get(path)
       return rec ? clone(rec.value) : null

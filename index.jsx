@@ -14,7 +14,7 @@ import {
 } from './constants.js'
 import { draftFromStoredEntry } from './format.js'
 import {
-  appendEntryToCurrentSession, assignSession, createSessionController,
+  appendEntryToCurrentSession, assignSession, buildSessionRecap, createSessionController,
   createVisiblePoller, currentSessionReady, entryBelongsToActiveDraft,
   groupSessions, lastEntryForExercise, localDate, makeCurrentSessionDocConfig,
   makeEntriesDocConfig, migrateLegacyState, normalizeCurrentSession,
@@ -48,16 +48,6 @@ function getUseDocument() {
   }
   _useDocument = factory(React)
   return _useDocument
-}
-
-function chatSessionFrom(session) {
-  const normalized = normalizeCurrentSession(session)
-  if (!normalized) return null
-  return {
-    id: normalized.id,
-    startedAt: normalized.startedAt,
-    localDate: normalized.localDate,
-  }
 }
 
 // useDocument returns a BRAND-NEW handle object on every render (its return is a
@@ -199,27 +189,20 @@ export default function App({ appId, token }) {
   useEffect(() => () => controller.dispose(), [controller])
 
   const [finishing, setFinishing] = useState(false)
-  // Brief "Session saved" confirmation after Finish. Auto-clears in 3s.
-  const [sessionSaved, setSessionSaved] = useState(false)
-  const sessionSavedTimerRef = useRef(null)
+  // Exercise-level recap from the last Finish gesture. It stays until dismissed
+  // or a new logging flow starts, so the useful comparison is not a 3s toast.
+  const [savedRecap, setSavedRecap] = useState(null)
   const bodyRef = useRef(null)
   // Chat is HIDDEN by default; the header toggle opens it as the bottom pane of
   // a draggable split (ported from app-latex). chatRatio is the chat pane's
   // fraction of the body height; both persist per app.
   const [chatOpen, setChatOpen] = useState(() => readChatOpen(appId))
   const [chatRatio, setChatRatio] = useState(() => readChatRatio(appId))
-  const [chatSession, setChatSession] = useState(null)
-
-  useEffect(() => {
-    if (!chatOpen) return
-    const active = chatSessionFrom(stampedSession)
-    if (!active) return
-    setChatSession((prev) => (prev?.id === active.id ? prev : active))
-  }, [chatOpen, stampedSession?.id, stampedSession?.localDate, stampedSession?.startedAt])
 
   const quickActions = useMemo(() => [
-    { label: 'Log a workout', prompt: 'Log a workout for me.' },
-    { label: 'What did I train this week?', prompt: 'Summarize what I trained this week.' },
+    { label: 'Repeat my last workout', prompt: 'Build today’s current session from my most recent workout. Keep it editable and do not commit it yet.' },
+    { label: 'Build today’s workout', prompt: 'Build a workout for today from my recent training, goals, constraints, and what looks undertrained. Put the plan in the current session draft.' },
+    { label: 'What needs attention?', prompt: 'Review my recent workout history and tell me what is undertrained, plateauing, or ready to progress. Keep it concise and actionable.' },
   ], [])
 
   const [editingEntry, setEditingEntry] = useState(null)
@@ -254,6 +237,13 @@ export default function App({ appId, token }) {
     if (typeof localStorage === 'undefined') return
     try { localStorage.setItem(chatRatioKey(appId), String(chatRatio)) } catch {}
   }, [appId, chatRatio])
+
+  const resetChatForNextSession = useCallback(async () => {
+    setChatOpen(false)
+    // The chat helper owns this file. Clearing it means the next workout opens
+    // in a fresh conversation without exposing a chat-session picker.
+    try { await store.set('chat_id.json', null) } catch {}
+  }, [store])
 
   const loadEntries = useCallback(async (options = {}) => {
     // entries.json is the entries doc — refresh() re-reads the fresh remote and
@@ -461,6 +451,7 @@ export default function App({ appId, token }) {
     const clearedCount = stampedSessionRef.current?.entries?.length ?? 0
     try {
       await controller.sessionWrite(() => null)
+      resetChatForNextSession()
     } catch (err) {
       retryActionRef.current = () => clearThenLog(pending)
       window.mobius?.signal?.('error', {
@@ -473,7 +464,7 @@ export default function App({ appId, token }) {
     // the second abandonment path the launch drop-off metric must cover.
     window.mobius?.signal?.('session_cleared', { reason: 'stale_replace', entry_count: clearedCount })
     await commitQuickAdd(pending.draft, pending.ts, { skipStaleCheck: true })
-  }, [controller, commitQuickAdd])
+  }, [controller, commitQuickAdd, resetChatForNextSession])
 
   const confirmStaleDraftReplace = useCallback(async () => {
     const pending = staleDraftPrompt
@@ -590,8 +581,7 @@ export default function App({ appId, token }) {
     try {
       await controller.sessionWrite(() => null)
       closeNestedNav()
-      setChatOpen(false)
-      setChatSession(null)
+      resetChatForNextSession()
       retryActionRef.current = null
       // session_cleared: the user deliberately abandoned a live draft. Abandonment
       // is the biggest launch drop-off metric, and the app instruments finishes
@@ -609,7 +599,7 @@ export default function App({ appId, token }) {
       // (retryActionRef) is the recovery path on failure, not a wedged modal.
       setClearSessionPending(false)
     }
-  }, [closeNestedNav, controller])
+  }, [closeNestedNav, controller, resetChatForNextSession])
 
   const finishCurrentSession = useCallback(async () => {
     if (finishInFlightRef.current) return
@@ -641,11 +631,9 @@ export default function App({ appId, token }) {
       const { committed, entries: nextEntries } = await controller.finish()
       if (committed.length === 0) return
       retryActionRef.current = null
+      resetChatForNextSession()
 
-      // Show a brief "Session saved" confirmation on the Session tab.
-      clearTimeout(sessionSavedTimerRef.current)
-      setSessionSaved(true)
-      sessionSavedTimerRef.current = setTimeout(() => setSessionSaved(false), 3000)
+      setSavedRecap(buildSessionRecap(prevEntries, committed))
 
       // session_logged: one signal per user "Finish session" gesture.
       const durationMin = finishedSession
@@ -676,7 +664,7 @@ export default function App({ appId, token }) {
       finishInFlightRef.current = false
       setFinishing(false)
     }
-  }, [controller, currentSession, entries])
+  }, [controller, currentSession, entries, resetChatForNextSession])
 
   const retryFailedSave = useCallback(() => {
     const retry = retryActionRef.current
@@ -687,56 +675,19 @@ export default function App({ appId, token }) {
     syncStatus.refresh()
   }, [syncStatus])
 
-  const ensureChatSession = useCallback(async () => {
-    const active = chatSessionFrom(controller.getSession())
-    if (active) {
-      setChatSession(active)
-      return active
-    }
-    const startedAt = Date.now()
-    const draft = normalizeCurrentSession({
-      id: `session-${startedAt}`,
-      startedAt,
-      status: 'active',
-      entries: [],
-    }, startedAt)
-    try {
-      await controller.sessionWrite((base) => normalizeCurrentSession(base) || draft)
-      const next = chatSessionFrom(controller.getSession()) || chatSessionFrom(draft)
-      setChatSession(next)
-      return next
-    } catch (err) {
-      retryActionRef.current = ensureChatSession
-      window.mobius?.signal?.('error', {
-        message: err?.message || 'current session save failed',
-        source: 'chat_session_start',
-      })
-      return null
-    }
-  }, [controller])
-
-  const toggleChat = useCallback(async () => {
-    if (chatOpen) {
-      setChatOpen(false)
-      if (!chatSessionFrom(controller.getSession())) setChatSession(null)
-      return
-    }
-    const sessionForChat = await ensureChatSession()
-    if (!sessionForChat) return
-    // Turning on always spawns a 50/50 split — the divider in the middle —
-    // regardless of where a previous drag left it.
-    setChatRatio(0.5)
-    setChatOpen(true)
-    // chat_opened: fires on a closed→open transition so Reflection can tell
-    // whether the embedded-agent feature is used or quick-add carries the app.
-    window.mobius?.signal?.('chat_opened')
-  }, [chatOpen, controller, ensureChatSession])
-
-  useEffect(() => {
-    if (!chatOpen) return
-    if (chatSessionFrom(stampedSession) || chatSession) return
-    ensureChatSession()
-  }, [chatOpen, chatSession?.id, ensureChatSession, stampedSession?.id])
+  const toggleChat = useCallback(() => {
+    setChatOpen((open) => {
+      // Turning on always spawns a 50/50 split — the divider in the middle —
+      // regardless of where a previous drag left it.
+      if (!open) {
+        setChatRatio(0.5)
+        // chat_opened: fires on a closed→open transition so Reflection can tell
+        // whether the embedded-agent feature is used or quick-add carries the app.
+        window.mobius?.signal?.('chat_opened')
+      }
+      return !open
+    })
+  }, [])
 
   const beginChatResize = useCallback((event) => {
     event.preventDefault()
@@ -802,6 +753,7 @@ export default function App({ appId, token }) {
   // category + activity) or null for a blank new entry. `allEntries` is the
   // current entries array, used to look up the last logged values.
   const openQuickAdd = useCallback(async (ex, allEntries) => {
+    setSavedRecap(null)
     closeNestedNav()
     if (window.mobius?.nav?.open) {
       const handle = window.mobius.nav.open('workout-quick-add', () => {
@@ -891,13 +843,13 @@ export default function App({ appId, token }) {
   // on, we're on the Session tab, and no full-screen card (edit/quick-add) owns
   // the body. This single flag gates the header toggle-state, the body's split
   // class + vars, and the divider/panel.
-  const activeChatSession = chatSessionFrom(stampedSession) || chatSession
-  const chatOnSessionTab = !!(chatOpen && activeChatSession && tab === 'session' && !editingEntry && !quickAddDraft)
+  const chatOnSessionTab = chatOpen && tab === 'session' && !editingEntry && !quickAddDraft
 
   return (
     <div className="wk-root">
       <style>{CSS}</style>
       <div className="wk-header">
+        <h1 className="wk-sr-only">Workout</h1>
         <div className="wk-brand">
           {/* Brand mark: the app's real glossy icon (downscaled + cached),
               no name text. Falls back to an accent dot when this install
@@ -1001,24 +953,54 @@ export default function App({ appId, token }) {
               <>
                 {tab === 'session' && (
                   <>
-                    {sessionSaved && (
-                      <div className="wk-card" role="status" style={{ marginBottom: 14, textAlign: 'center', color: 'var(--accent)' }}>
-                        Session saved — find it in History.
+                    {savedRecap && (
+                      <section className="wk-session-recap" role="status" aria-label="Saved session progress">
+                        <div className="wk-session-recap-head">
+                          <div>
+                            <strong>Session saved</strong>
+                            <span>What changed, exercise by exercise.</span>
+                          </div>
+                          <button type="button" className="wk-icon-btn" onClick={() => setSavedRecap(null)} aria-label="Dismiss session recap">×</button>
+                        </div>
+                        <div className="wk-session-recap-list">
+                          {savedRecap.map((row) => (
+                            <div key={row.key} className={`wk-recap-row is-${row.tone}`}>
+                              <span className="wk-recap-icon" style={{ background: `${row.color}22` }} aria-hidden>
+                                <SportIcon name={row.icon} color={row.color} size={17} />
+                              </span>
+                              <span className="wk-recap-copy">
+                                <strong>{row.activity}</strong>
+                                <small>{row.headline} · {row.detail || 'Logged'}</small>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+                    <div className={`wk-session-layout${stampedSession ? '' : ' is-empty'}`}>
+                      {stampedSession && (
+                        <div className="wk-session-main">
+                          <CurrentSessionPanel
+                            session={stampedSession}
+                            historyEntries={entries}
+                            onFinish={finishCurrentSession}
+                            onDeleteEntry={deleteDraftEntry}
+                            onEditEntry={editSessionEntry}
+                            onClear={openClearSessionConfirm}
+                            finishing={finishing}
+                          />
+                        </div>
+                      )}
+                      <div className="wk-session-side">
+                        {/* Quick-add stays visible during an active session — it
+                            appends to the draft, so the next tap logs entry #2. */}
+                        <QuickAddStrip
+                          entries={entries}
+                          onQuickAdd={openQuickAdd}
+                          onOpenCoach={chatOpen ? null : toggleChat}
+                        />
                       </div>
-                    )}
-                    {stampedSession && (
-                      <CurrentSessionPanel
-                        session={stampedSession}
-                        onFinish={finishCurrentSession}
-                        onDeleteEntry={deleteDraftEntry}
-                        onEditEntry={editSessionEntry}
-                        onClear={openClearSessionConfirm}
-                        finishing={finishing}
-                      />
-                    )}
-                    {/* Quick-add stays visible during an active session — it
-                        appends to the draft, so the next tap logs entry #2. */}
-                    <QuickAddStrip entries={entries} onQuickAdd={openQuickAdd} />
+                    </div>
                   </>
                 )}
                 {tab === 'history' && (
@@ -1056,7 +1038,6 @@ export default function App({ appId, token }) {
               appId={appId}
               token={token}
               store={store}
-              session={activeChatSession}
               quickActions={quickActions}
               onEntriesMaybeChanged={() => {
                 loadEntries({ allowMigration: false })

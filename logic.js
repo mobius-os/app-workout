@@ -42,6 +42,111 @@ export const CATEGORIES = {
 
 export const CATEGORY_KEYS = Object.keys(CATEGORIES)
 
+export const ACTIVITY_GROUPS = [
+  { key: 'all', label: 'All' },
+  { key: 'strength', label: 'Strength' },
+  { key: 'endurance', label: 'Endurance' },
+  { key: 'outdoor', label: 'Outdoor' },
+  { key: 'sports', label: 'Sports' },
+  { key: 'mobility', label: 'Mobility' },
+]
+
+// Human-facing manual-add library. The storage category enum stays compact for
+// analytics; this list is what makes the picker feel complete and searchable.
+export const ACTIVITY_LIBRARY = [
+  { name: 'Deadlift', category: 'strength', group: 'strength', aliases: ['barbell deadlift', 'sumo deadlift'] },
+  { name: 'Back squat', category: 'strength', group: 'strength', aliases: ['squat'] },
+  { name: 'Front squat', category: 'strength', group: 'strength' },
+  { name: 'Bench press', category: 'strength', group: 'strength', aliases: ['bench'] },
+  { name: 'Incline bench press', category: 'strength', group: 'strength' },
+  { name: 'Overhead press', category: 'strength', group: 'strength', aliases: ['shoulder press', 'ohp'] },
+  { name: 'Barbell row', category: 'strength', group: 'strength' },
+  { name: 'Dumbbell row', category: 'strength', group: 'strength' },
+  { name: 'Pull-up', category: 'strength', group: 'strength', aliases: ['pullup'] },
+  { name: 'Chin-up', category: 'strength', group: 'strength', aliases: ['chinup'] },
+  { name: 'Lat pulldown', category: 'strength', group: 'strength' },
+  { name: 'Push-up', category: 'strength', group: 'strength', aliases: ['pushup'] },
+  { name: 'Dip', category: 'strength', group: 'strength', aliases: ['dips'] },
+  { name: 'Lunge', category: 'strength', group: 'strength', aliases: ['lunges'] },
+  { name: 'Bulgarian split squat', category: 'strength', group: 'strength' },
+  { name: 'Leg press', category: 'strength', group: 'strength' },
+  { name: 'Romanian deadlift', category: 'strength', group: 'strength', aliases: ['rdl'] },
+  { name: 'Hip thrust', category: 'strength', group: 'strength' },
+  { name: 'Calf raise', category: 'strength', group: 'strength' },
+  { name: 'Biceps curl', category: 'strength', group: 'strength', aliases: ['curl'] },
+  { name: 'Triceps extension', category: 'strength', group: 'strength' },
+  { name: 'Shoulder raise', category: 'strength', group: 'strength', aliases: ['lateral raise'] },
+  { name: 'Kettlebell swing', category: 'strength', group: 'strength' },
+  { name: 'Farmer carry', category: 'strength', group: 'strength', aliases: ['farmers carry'] },
+  { name: 'Plank', category: 'strength', group: 'strength' },
+  { name: 'Crunch', category: 'strength', group: 'strength' },
+  { name: 'Run', category: 'running', group: 'endurance', aliases: ['running', 'jog'] },
+  { name: 'Trail run', category: 'running', group: 'endurance' },
+  { name: 'Treadmill run', category: 'running', group: 'endurance' },
+  { name: 'Walk', category: 'hiking', group: 'endurance', aliases: ['walking'] },
+  { name: 'Nordic walking', category: 'hiking', group: 'endurance', aliases: ['nordic walk'] },
+  { name: 'Hike', category: 'hiking', group: 'outdoor', aliases: ['hiking'] },
+  { name: 'Ruck', category: 'hiking', group: 'outdoor', aliases: ['rucking'] },
+  { name: 'Cycling', category: 'cycling', group: 'endurance', aliases: ['bike', 'road cycling'] },
+  { name: 'Mountain biking', category: 'cycling', group: 'outdoor', aliases: ['mtb'] },
+  { name: 'Indoor cycling', category: 'cycling', group: 'endurance', aliases: ['spin', 'spinning'] },
+  { name: 'Swimming', category: 'swimming', group: 'endurance', aliases: ['swim'] },
+  { name: 'Rowing', category: 'rowing', group: 'endurance', aliases: ['erg', 'ergometer'] },
+  { name: 'Elliptical', category: 'cardio', group: 'endurance', aliases: ['cross trainer', 'crosstrainer'] },
+  { name: 'Stair climber', category: 'cardio', group: 'endurance', aliases: ['stairmaster', 'stepmill'] },
+  { name: 'Jump rope', category: 'cardio', group: 'endurance', aliases: ['skipping', 'jumprope'] },
+  { name: 'HIIT', category: 'cardio', group: 'endurance', aliases: ['intervals', 'tabata'] },
+  { name: 'Circuit training', category: 'cardio', group: 'endurance', aliases: ['metcon', 'conditioning'] },
+  { name: 'Kayaking', category: 'rowing', group: 'outdoor', aliases: ['kayak'] },
+  { name: 'Canoeing', category: 'rowing', group: 'outdoor', aliases: ['canoe'] },
+  { name: 'Paddleboarding', category: 'rowing', group: 'outdoor', aliases: ['sup'] },
+  { name: 'Surfing', category: 'sport', group: 'outdoor', aliases: ['surf'] },
+  { name: 'Climbing', category: 'sport', group: 'outdoor', aliases: ['rock climbing'] },
+  { name: 'Bouldering', category: 'sport', group: 'outdoor' },
+  { name: 'Skiing', category: 'sport', group: 'outdoor', aliases: ['downhill skiing'] },
+  { name: 'Cross-country skiing', category: 'sport', group: 'outdoor', aliases: ['nordic skiing', 'xc skiing'] },
+  { name: 'Snowboarding', category: 'sport', group: 'outdoor' },
+  { name: 'Ice skating', category: 'sport', group: 'outdoor' },
+  { name: 'Roller skating', category: 'sport', group: 'outdoor', aliases: ['inline skating', 'rollerblading'] },
+  { name: 'Skateboarding', category: 'sport', group: 'outdoor' },
+  { name: 'Golf', category: 'sport', group: 'sports' },
+  { name: 'Basketball', category: 'sport', group: 'sports', aliases: ['hoops'] },
+  { name: 'Handball', category: 'sport', group: 'sports' },
+  { name: 'Soccer', category: 'sport', group: 'sports', aliases: ['football', 'futsal'] },
+  { name: 'American football', category: 'sport', group: 'sports', aliases: ['gridiron'] },
+  { name: 'Rugby', category: 'sport', group: 'sports' },
+  { name: 'Tennis', category: 'sport', group: 'sports' },
+  { name: 'Padel', category: 'sport', group: 'sports' },
+  { name: 'Pickleball', category: 'sport', group: 'sports' },
+  { name: 'Badminton', category: 'sport', group: 'sports' },
+  { name: 'Squash', category: 'sport', group: 'sports' },
+  { name: 'Volleyball', category: 'sport', group: 'sports' },
+  { name: 'Baseball', category: 'sport', group: 'sports' },
+  { name: 'Softball', category: 'sport', group: 'sports' },
+  { name: 'Hockey', category: 'sport', group: 'sports' },
+  { name: 'Field hockey', category: 'sport', group: 'sports' },
+  { name: 'Cricket', category: 'sport', group: 'sports' },
+  { name: 'Lacrosse', category: 'sport', group: 'sports' },
+  { name: 'Netball', category: 'sport', group: 'sports' },
+  { name: 'Ultimate frisbee', category: 'sport', group: 'sports', aliases: ['ultimate'] },
+  { name: 'Table tennis', category: 'sport', group: 'sports', aliases: ['ping pong'] },
+  { name: 'Boxing', category: 'sport', group: 'sports' },
+  { name: 'Kickboxing', category: 'sport', group: 'sports' },
+  { name: 'Martial arts', category: 'sport', group: 'sports', aliases: ['mma', 'karate', 'judo', 'bjj', 'taekwondo'] },
+  { name: 'Wrestling', category: 'sport', group: 'sports' },
+  { name: 'Yoga', category: 'yoga', group: 'mobility' },
+  { name: 'Pilates', category: 'yoga', group: 'mobility' },
+  { name: 'Mobility', category: 'yoga', group: 'mobility' },
+  { name: 'Stretching', category: 'yoga', group: 'mobility' },
+  { name: 'Barre', category: 'yoga', group: 'mobility' },
+  { name: 'Dance', category: 'cardio', group: 'mobility', aliases: ['dancing'] },
+  { name: 'Zumba', category: 'cardio', group: 'mobility' },
+  { name: 'Meditation', category: 'other', group: 'mobility' },
+  { name: 'Breathwork', category: 'other', group: 'mobility' },
+  { name: 'Physical therapy', category: 'other', group: 'mobility', aliases: ['physio', 'rehab'] },
+  { name: 'Foam rolling', category: 'other', group: 'mobility' },
+]
+
 // Which metric family a category logs. Strength logs sets; the cardio family
 // logs duration/distance; everything else logs duration/location/note. The
 // LLM is told this split so it returns the right metrics shape, but we re-derive
@@ -182,6 +287,66 @@ export function sportIconKey(activity, category) {
 
 export function sportIconColor(icon, category) {
   return SPORT_ICON_COLORS[icon] || CATEGORIES[category]?.color || CATEGORIES.other.color
+}
+
+export function normalizeActivitySearch(value) {
+  return (typeof value === 'string' ? value : '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function activityLibraryView(row) {
+  const icon = sportIconKey(row.name, row.category)
+  return {
+    ...row,
+    icon,
+    color: sportIconColor(icon, row.category),
+    family: categoryFamily(row.category),
+    metricLabel: categoryFamily(row.category) === 'strength'
+      ? 'sets'
+      : categoryFamily(row.category) === 'cardio'
+        ? 'distance/time'
+        : 'duration/notes',
+  }
+}
+
+export function findActivityLibraryItem(value) {
+  const text = normalizeActivitySearch(value)
+  if (!text) return null
+  for (const row of ACTIVITY_LIBRARY) {
+    if (normalizeActivitySearch(row.name) === text) return activityLibraryView(row)
+    if ((row.aliases || []).some((alias) => normalizeActivitySearch(alias) === text)) {
+      return activityLibraryView(row)
+    }
+  }
+  return null
+}
+
+export function searchActivityLibrary(query = '', opts = {}) {
+  const text = normalizeActivitySearch(query)
+  const group = opts.group || 'all'
+  const limit = Number.isFinite(Number(opts.limit)) ? Number(opts.limit) : 48
+  const rows = ACTIVITY_LIBRARY.filter((row) => group === 'all' || row.group === group)
+  if (!text) return rows.slice(0, limit).map(activityLibraryView)
+
+  const scored = []
+  for (const row of rows) {
+    const name = normalizeActivitySearch(row.name)
+    const aliases = (row.aliases || []).map(normalizeActivitySearch)
+    let score = null
+    if (name === text) score = 0
+    else if (name.startsWith(text)) score = 1
+    else if (aliases.some((alias) => alias === text)) score = 2
+    else if (aliases.some((alias) => alias.startsWith(text))) score = 3
+    else if (name.includes(text)) score = 4
+    else if (aliases.some((alias) => alias.includes(text))) score = 5
+    if (score != null) scored.push({ score, row })
+  }
+  return scored
+    .sort((a, b) => a.score - b.score || a.row.name.localeCompare(b.row.name))
+    .slice(0, limit)
+    .map(({ row }) => activityLibraryView(row))
 }
 
 // Default gap (ms) that splits one session from the next. Two entries within
@@ -340,6 +505,10 @@ export function normalizeEntry(parsed, opts = {}) {
           weight_kg: rawWeight == null ? null : Math.max(0, toKg(rawWeight, s.unit || 'kg')),
           reps: rawReps == null ? null : Math.max(0, Math.round(rawReps)),
           unit: s.unit === 'lb' ? 'lb' : 'kg',
+          ...(s.completed === true ? {
+            completed: true,
+            completedAt: Number.isFinite(Number(s.completedAt)) ? Number(s.completedAt) : null,
+          } : {}),
         }
       }),
     }
@@ -443,6 +612,10 @@ export function normalizeStoredEntry(entry, opts = {}) {
             weight_kg,
             reps,
             unit: s?.unit === 'lb' ? 'lb' : 'kg',
+            ...(s?.completed === true ? {
+              completed: true,
+              completedAt: Number.isFinite(Number(s?.completedAt)) ? Number(s.completedAt) : null,
+            } : {}),
           }
         })
         .filter(Boolean)
@@ -1484,6 +1657,105 @@ export function lastEntryForExercise(entries, category, activity) {
     }
   }
   return best
+}
+
+function bestStrengthSetForEntry(entry) {
+  let best = null
+  for (const set of entry?.metrics?.sets || []) {
+    const estimate = epley1RM(set?.weight_kg, set?.reps)
+    if (estimate > 0 && (!best || estimate > best.estimate)) best = { set, estimate }
+  }
+  return best
+}
+
+function signedPercent(current, previous) {
+  if (!(current > 0) || !(previous > 0)) return null
+  return Math.round(((current - previous) / previous) * 100)
+}
+
+// Actionable, exercise-level recap for the just-finished session. Hevy's
+// strongest post-workout pattern is not the vanity "total weight moved" number;
+// it is showing what changed for each exercise. This helper keeps that value in
+// Mobius while staying category-agnostic and deterministic (the coach can add a
+// richer interpretation in chat, but the saved state never waits on a model).
+export function buildSessionRecap(history, committed) {
+  const before = Array.isArray(history) ? history : []
+  return (committed || []).map((entry) => {
+    const previous = lastEntryForExercise(before, entry.category, entry.activity)
+    const family = categoryFamily(entry.category)
+    const icon = sportIconKey(entry.activity, entry.category)
+    const base = {
+      key: entry.id || exerciseKey(entry.category, entry.activity),
+      activity: entry.activity,
+      icon,
+      color: sportIconColor(icon, entry.category),
+      tone: 'steady',
+      headline: 'Logged',
+      detail: summarizeMetrics(entry),
+    }
+
+    if (family === 'strength') {
+      const currentBest = bestStrengthSetForEntry(entry)
+      if (!currentBest) return base
+      const previousBest = bestStrengthSetForEntry(previous)
+      let lifetimeBest = 0
+      for (const row of before) {
+        if (exerciseKey(row.category, row.activity) !== exerciseKey(entry.category, entry.activity)) continue
+        lifetimeBest = Math.max(lifetimeBest, bestStrengthSetForEntry(row)?.estimate || 0)
+      }
+      const unit = currentBest.set.unit === 'lb' ? 'lb' : 'kg'
+      const estimateLabel = `${fromKg(Math.round(currentBest.estimate * 10) / 10, unit)}${unit} e1RM`
+      const delta = signedPercent(currentBest.estimate, previousBest?.estimate)
+      if (currentBest.estimate > lifetimeBest && lifetimeBest > 0) {
+        return {
+          ...base,
+          tone: 'pr',
+          headline: 'New strength PR',
+          detail: `${estimateLabel}${delta != null && delta !== 0 ? ` · ${delta > 0 ? '+' : ''}${delta}% vs last` : ''}`,
+        }
+      }
+      if (delta != null && delta !== 0) {
+        return {
+          ...base,
+          tone: delta > 0 ? 'up' : 'down',
+          headline: delta > 0 ? 'Stronger than last time' : 'Below last session',
+          detail: `${estimateLabel} · ${delta > 0 ? '+' : ''}${delta}%`,
+        }
+      }
+      return { ...base, headline: previousBest ? 'Matched last session' : 'First baseline', detail: estimateLabel }
+    }
+
+    if (family === 'cardio') {
+      const distance = Number(entry.metrics?.distance_m) || 0
+      const duration = Number(entry.metrics?.duration_s) || 0
+      const prevDistance = Number(previous?.metrics?.distance_m) || 0
+      const currentPace = paceSecPerKm(duration, distance)
+      const previousPace = paceSecPerKm(previous?.metrics?.duration_s, previous?.metrics?.distance_m)
+      const paceDelta = currentPace && previousPace
+        ? Math.round(((previousPace - currentPace) / previousPace) * 100)
+        : null
+      if (paceDelta != null && paceDelta !== 0) {
+        return {
+          ...base,
+          tone: paceDelta > 0 ? 'up' : 'down',
+          headline: paceDelta > 0 ? 'Faster than last time' : 'Slower than last time',
+          detail: `${fmtPace(duration, distance)} · ${paceDelta > 0 ? '+' : ''}${paceDelta}% pace`,
+        }
+      }
+      const distanceDelta = signedPercent(distance, prevDistance)
+      if (distanceDelta != null && distanceDelta !== 0) {
+        return {
+          ...base,
+          tone: distanceDelta > 0 ? 'up' : 'down',
+          headline: distanceDelta > 0 ? 'Went farther' : 'Shorter session',
+          detail: `${fmtDistance(distance)} · ${distanceDelta > 0 ? '+' : ''}${distanceDelta}% distance`,
+        }
+      }
+      return { ...base, headline: previous ? 'Matched recent work' : 'First baseline' }
+    }
+
+    return { ...base, headline: previous ? 'Session logged' : 'First baseline' }
+  })
 }
 
 // The N most recently logged distinct exercises (category + activity pairs),

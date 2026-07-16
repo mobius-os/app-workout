@@ -2,25 +2,34 @@ import React, { useMemo } from 'react'
 import { recentExercises } from '../logic.js'
 import { SportIcon } from './SportIcon.jsx'
 
-export function QuickAddStrip({ entries, onQuickAdd }) {
-  const recents = useMemo(() => recentExercises(entries, 5), [entries])
+export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
+  const recents = useMemo(() => recentExercises(entries, 6), [entries])
   if (!entries || entries.length === 0) {
     return (
-      <div className="wk-quick-add">
-        <div className="wk-quick-add-label">Quick add</div>
+      <div className="wk-quick-add is-empty">
+        <div className="wk-quick-add-label">
+          <span>Log activity</span>
+        </div>
         <div className="wk-quick-chip-row">
           <button className="wk-quick-add-btn" onClick={() => onQuickAdd(null, null)}
-            aria-label="Add new exercise">+ New exercise</button>
+            aria-label="Browse activity library">Browse activities</button>
         </div>
+        {onOpenCoach && (
+          <button type="button" className="wk-coach-cta" onClick={onOpenCoach}>
+            <span className="wk-coach-cta-icon" aria-hidden><SportIcon name="sparkles" size={18} /></span>
+            <span><strong>Plan with coach</strong><small>Repeat, adapt, or build today’s session</small></span>
+            <span aria-hidden>›</span>
+          </button>
+        )}
       </div>
     )
   }
   return (
     <div className="wk-quick-add">
       <div className="wk-quick-add-label">
-        <span>Quick add</span>
+        <span>Log activity</span>
         <button className="wk-quick-add-btn" style={{ marginLeft: 0 }}
-          onClick={() => onQuickAdd(null, null)} aria-label="Add new exercise">+ New</button>
+          onClick={() => onQuickAdd(null, null)} aria-label="Browse activity library">Browse</button>
       </div>
       <div className="wk-quick-chip-row">
         {recents.map((ex) => (
@@ -35,6 +44,13 @@ export function QuickAddStrip({ entries, onQuickAdd }) {
           </button>
         ))}
       </div>
+      {onOpenCoach && (
+        <button type="button" className="wk-coach-cta" onClick={onOpenCoach}>
+          <span className="wk-coach-cta-icon" aria-hidden><SportIcon name="sparkles" size={18} /></span>
+          <span><strong>Plan with coach</strong><small>Repeat, adapt, or build today’s session</small></span>
+          <span aria-hidden>›</span>
+        </button>
+      )}
     </div>
   )
 }

@@ -17,8 +17,9 @@ import {
   sessionEntryMissing, currentSessionReady, entriesFromCurrentSession,
   appendEntryToCurrentSession, mergeCurrentSessions,
   exerciseKey, exerciseList, exerciseDetail, paceSecPerKm, fmtPace,
-  lastEntryForExercise, recentExercises,
+  lastEntryForExercise, recentExercises, buildSessionRecap,
   sportIconKey, sportIconColor, SPORT_ICON_RULES, SPORT_ICON_COLORS, CATEGORIES,
+  ACTIVITY_LIBRARY, findActivityLibraryItem, searchActivityLibrary,
   createVisiblePoller, createSessionController,
   makeEntriesDocConfig, makeCurrentSessionDocConfig, reconcileDraftIds,
   entryBelongsToActiveDraft,
@@ -1099,6 +1100,21 @@ test('sportIconColor: per-icon color, else category color, else generic', () => 
   assert.equal(sportIconColor('unknown-icon', 'nope'), CATEGORIES.other.color)
 })
 
+test('activity library includes broad manual-add examples and maps them to analytics categories', () => {
+  assert.ok(ACTIVITY_LIBRARY.length >= 80)
+  assert.equal(findActivityLibraryItem('basketball').category, 'sport')
+  assert.equal(findActivityLibraryItem('handball').category, 'sport')
+  assert.equal(findActivityLibraryItem('nordic walking').category, 'hiking')
+  assert.equal(findActivityLibraryItem('bench').name, 'Bench press')
+})
+
+test('searchActivityLibrary searches aliases and respects groups', () => {
+  assert.equal(searchActivityLibrary('hoops')[0].name, 'Basketball')
+  assert.equal(searchActivityLibrary('nordic')[0].name, 'Nordic walking')
+  assert.ok(searchActivityLibrary('', { group: 'sports' }).every((item) => item.group === 'sports'))
+  assert.ok(searchActivityLibrary('row', { group: 'strength' }).some((item) => item.name === 'Barbell row'))
+})
+
 // --- visible-tab poller (agent-logged sessions surface without a refresh) ---
 
 // Fake document/window pair: captures listeners and intervals so the poller's
@@ -1427,4 +1443,48 @@ test('editing a cardio entry with an explicit unit stores correct SI', () => {
     { id: 'r', ts: base, source: 'manual', confirmed: true },
   )
   assert.equal(edited40min.metrics.duration_s, 2430)
+})
+
+test('strength set completion survives parsed and stored normalization', () => {
+  const completedAt = base + 1234
+  const entry = normalizeEntry(
+    {
+      category: 'strength', activity: 'Squat',
+      metrics: { sets: [{ weight: 100, reps: 5, unit: 'kg', completed: true, completedAt }] },
+    },
+    { id: 'done-set', ts: base, source: 'manual', confirmed: true },
+  )
+  assert.equal(entry.metrics.sets[0].completed, true)
+  assert.equal(entry.metrics.sets[0].completedAt, completedAt)
+  const session = normalizeCurrentSession({ id: 's', startedAt: base, entries: [entry] })
+  assert.equal(session.entries[0].metrics.sets[0].completed, true)
+  assert.equal(session.entries[0].metrics.sets[0].completedAt, completedAt)
+})
+
+test('buildSessionRecap highlights exercise progress instead of vanity volume', () => {
+  const history = [
+    normalizeEntry(
+      { category: 'strength', activity: 'Squat', metrics: { sets: [{ weight: 100, reps: 5, unit: 'kg' }] } },
+      { id: 'old-squat', ts: base - 86400000 },
+    ),
+    normalizeEntry(
+      { category: 'running', activity: 'Run', metrics: { distance: { value: 5, unit: 'km' }, duration: { value: 30, unit: 'min' } } },
+      { id: 'old-run', ts: base - 86400000 },
+    ),
+  ]
+  const committed = [
+    normalizeEntry(
+      { category: 'strength', activity: 'Squat', metrics: { sets: [{ weight: 105, reps: 5, unit: 'kg' }] } },
+      { id: 'new-squat', ts: base },
+    ),
+    normalizeEntry(
+      { category: 'running', activity: 'Run', metrics: { distance: { value: 5, unit: 'km' }, duration: { value: 27, unit: 'min' } } },
+      { id: 'new-run', ts: base + 1000 },
+    ),
+  ]
+  const recap = buildSessionRecap(history, committed)
+  assert.equal(recap[0].headline, 'New strength PR')
+  assert.match(recap[0].detail, /vs last/)
+  assert.equal(recap[1].headline, 'Faster than last time')
+  assert.match(recap[1].detail, /pace/)
 })

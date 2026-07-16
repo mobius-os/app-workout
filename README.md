@@ -18,7 +18,7 @@ https://raw.githubusercontent.com/mobius-os/app-workout/main/mobius.json
 
 ## How it works
 
-The **Session** tab is the home surface: a live current-session draft plus a quick-add strip, with an embedded Möbius chat available behind a header toggle (hidden by default). Tell the Workout agent what you did — for example, `deadlift 3×5 at 120kg, swam 40 minutes, then hiked 8km` — or tap **Quick add**, and the app maintains `current_session.json`. It shows that draft live, refreshes it after each chat turn, and commits the complete group into `entries.json` only when you press **Finish session**. Model/provider selection is the normal embedded-chat picker, the same path used by the LaTeX app.
+The **Session** tab is the home surface: a live current-session worksheet, previous-performance context, one-tap set completion with rest feedback, a searchable activity library with recent shortcuts, and an embedded Möbius coach behind the header toggle. Tell the coach to repeat your last workout, build today from recent training, or adjust the open session; there is no separate routine-builder to maintain. The app keeps the result in `current_session.json`, refreshes it after each chat turn, and commits the complete group into `entries.json` only when you press **Finish session**.
 
 Required details are intentionally strict:
 
@@ -30,13 +30,13 @@ If the user says `2 sets of deadlifts`, the agent should ask for reps and weight
 
 Three top tabs:
 
-- **Session** — the live current-session draft (an editable worksheet: fill in reps/weight/distance/duration in place, each cell with a visible unit), a quick-add strip for repeat exercises, and the toggle-in Workout chat. A follow-up like "another set with 90" resolves in the ongoing chat context.
+- **Session** — the live current-session draft. Strength rows show the matching set from last time, can reuse the previous exercise in one tap, mark sets complete, and start a 90-second rest timer. The side rail combines recent manual shortcuts with agent actions such as **Repeat my last workout** and **Build today’s workout**. On wider screens the current session and activity rail sit side by side; on mobile they stack.
 - **History** — a flat, newest-first list of every committed entry, with edit and delete.
 - **Insights** — analytics *by category and exercise*: weekly volume over the last 6 weeks (strength = kg·reps, cardio = km, other = minutes), category stats, strength PRs ranked by estimated 1-rep max (Epley), cardio bests, and a 26-week streak heatmap. **Tap any exercise** (in the Exercises, Strength PRs, or Cardio bests tables) to open its drill-down: lifetime records (heaviest, est. 1RM, best set/session volume, most reps — or longest distance/time and best pace for cardio), a per-session trend sparkline (estimated-1RM for lifts, distance/pace for cardio), set-records (best weight at each rep count), and full session history. The trend is hand-drawn SVG, so the drill-down works offline like the rest of Insights.
 
-## Categories
+## Activities
 
-Ten categories — `strength`, `cardio`, `running`, `cycling`, `swimming`, `rowing`, `hiking`, `yoga`, `sport`, `other`. The model picks the category *key*; the app owns the icon and color, so a hallucinated emoji can never drift the look of the app.
+The manual add UI shows a broad searchable activity library: lifts, endurance work, outdoor activities, sports, and mobility/recovery. The internal storage still uses compact analytics buckets — `strength`, `cardio`, `running`, `cycling`, `swimming`, `rowing`, `hiking`, `yoga`, `sport`, `other` — but users should not have to choose from that implementation enum. The app maps selected activities into the right bucket, owns icon/color selection, and keeps custom activity names available when the library does not have an exact match.
 
 ## Data shape
 
@@ -52,7 +52,7 @@ Workout keeps the in-progress workout in `current_session.json`, then appends co
     "category": "strength",
     "activity": "Deadlift",
     "icon": "barbell",
-    "metrics": { "sets": [{ "weight_kg": 100, "reps": 8, "unit": "kg" }] },
+    "metrics": { "sets": [{ "weight_kg": 100, "reps": 8, "unit": "kg", "completed": true, "completedAt": 1735730120000 }] },
     "raw": "did 1 set of deadlift 100kg x8",
     "source": "ai",
     "confirmed": true

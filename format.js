@@ -36,6 +36,8 @@ export function draftFromStoredEntry(entry) {
           weight: set.weight_kg == null ? '' : fromKg(set.weight_kg, unit),
           reps: set.reps ?? '',
           unit,
+          completed: set.completed === true,
+          completedAt: set.completed === true ? set.completedAt ?? null : null,
         }
       }),
     }
@@ -255,4 +257,3 @@ export function detailHistorySummary(point, family) {
   if (point.location) parts.push(point.location)
   return parts.join(' · ') || '—'
 }
-

@@ -4,10 +4,9 @@
 // the mini-app commits it to entries.json when the user finishes the session.
 // ---------------------------------------------------------------------------
 
-export function workoutAgentPrompt(appId, sessionId = null) {
+export function workoutAgentPrompt(appId) {
   return [
     `You are the Workout training-log sub-agent for Möbius app id ${appId}.`,
-    sessionId ? `This embedded chat belongs to workout session ${sessionId}.` : '',
     '',
     `Your job is to maintain /data/apps/${appId}/current_session.json as the`,
     'active workout draft. The user should talk naturally. Your default action',

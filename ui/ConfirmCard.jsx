@@ -1,5 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { CATEGORIES, CATEGORY_KEYS, categoryFamily, fromKg, localDate, normalizeEntry, sessionEntryMissing } from '../logic.js'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
+import {
+  ACTIVITY_GROUPS, ACTIVITY_LIBRARY, CATEGORIES, categoryFamily, findActivityLibraryItem,
+  fromKg, localDate, normalizeEntry, searchActivityLibrary, sessionEntryMissing,
+  sportIconColor, sportIconKey,
+} from '../logic.js'
 import { metresToDisplay, secondsToDisplay } from '../format.js'
 import { ConfirmModal } from './ConfirmModal.jsx'
 import { SportIcon } from './SportIcon.jsx'
@@ -11,7 +15,29 @@ export function ConfirmCard({
 }) {
   const [category, setCategory] = useState(draft.category)
   const [activity, setActivity] = useState(draft.activity)
+  const [activitySearch, setActivitySearch] = useState(draft.activity)
+  const [activityGroup, setActivityGroup] = useState('all')
   const fam = categoryFamily(category)
+  const selectedIcon = sportIconKey(activity, category)
+  const selectedColor = sportIconColor(selectedIcon, category)
+  const selectedMetricLabel = fam === 'strength' ? 'Sets' : fam === 'cardio' ? 'Distance/time' : 'Duration/notes'
+  const groupLabels = useMemo(() => new Map(ACTIVITY_GROUPS.map((group) => [group.key, group.label])), [])
+  const activityGroupCounts = useMemo(() => {
+    const counts = Object.fromEntries(ACTIVITY_GROUPS.map((group) => [group.key, 0]))
+    counts.all = ACTIVITY_LIBRARY.length
+    for (const item of ACTIVITY_LIBRARY) counts[item.group] = (counts[item.group] || 0) + 1
+    return counts
+  }, [])
+  const activityResults = useMemo(
+    () => searchActivityLibrary(activitySearch, {
+      group: activityGroup,
+      limit: activitySearch.trim() ? 48 : 96,
+    }),
+    [activityGroup, activitySearch],
+  )
+  const resultCountLabel = activitySearch.trim()
+    ? `${activityResults.length} ${activityResults.length === 1 ? 'match' : 'matches'}`
+    : `${activityGroupCounts[activityGroup] || activityResults.length} activities`
   const initialDate = new Date(initialTs)
   const [dateValue, setDateValue] = useState(() => localDate(initialDate))
   const [timeValue, setTimeValue] = useState(() => {
@@ -83,31 +109,29 @@ export function ConfirmCard({
     draft.metrics?.location ?? (lastCardio?.metrics?.location || ''),
   )
   const [note, setNote] = useState(draft.metrics?.note ?? '')
-  // Category change crossing a metric family clears the old family's inputs (a
-  // strength entry has sets; a cardio one has distance/duration; etc). Since
-  // handleCommit only reads the CURRENT family's fields, the old values would be
-  // dropped silently on save — so we confirm before clearing when the abandoned
-  // family actually holds entered data. pendingCategory holds the requested key
-  // while that confirm modal is open.
-  const [pendingCategory, setPendingCategory] = useState(null)
+  // Activity changes can also change metric family (sets vs distance/time vs
+  // duration/note). Since handleCommit only reads the CURRENT family's fields,
+  // the old values would be dropped silently on save — so we confirm before
+  // clearing when the abandoned family actually holds entered data.
+  const [pendingActivity, setPendingActivity] = useState(null)
 
-  // The category-switch confirm is a modal NESTED inside this entry sheet (which
+  // The activity-family confirm is a modal NESTED inside this entry sheet (which
   // already owns an outer shell back sentinel). Without its own sentinel, an
   // Android back press while it is open pops the OUTER sentinel and destroys the
   // whole in-progress entry instead of just dismissing the confirm. Push a
   // nested sentinel for the confirm's lifetime so back dismisses only the
-  // confirm; the button paths clear pendingCategory, whose effect-cleanup pops
+  // confirm; the button paths clear pendingActivity, whose effect-cleanup pops
   // the sentinel (the ref guard prevents a double-pop when back already popped).
   const catNavRef = useRef(null)
   useEffect(() => {
-    if (!pendingCategory) return undefined
+    if (!pendingActivity) return undefined
     const navOpen = window.mobius?.nav?.open
     if (typeof navOpen !== 'function') return undefined
     let handle = null
     try {
       handle = navOpen('workout-category-confirm', () => {
         catNavRef.current = null
-        setPendingCategory(null)
+        setPendingActivity(null)
       })
     } catch { handle = null }
     if (!handle) return undefined
@@ -119,7 +143,7 @@ export function ConfirmCard({
         try { handle.close?.() } catch {}
       }
     }
-  }, [pendingCategory])
+  }, [pendingActivity])
 
   // Sets is an integer ≥ 1. A blank or sub-1 typed value clamps to 1 on the way
   // into the commit draft; the input itself stays lenient so the user can clear
@@ -150,24 +174,36 @@ export function ConfirmCard({
       setDuration(''); setLocation(''); setNote('')
     }
   }
-  const applyCategory = (k) => {
+  const applyActivity = (item) => {
+    if (!item) return
     const prevFam = categoryFamily(category)
-    const nextFam = categoryFamily(k)
+    const nextFam = categoryFamily(item.category)
     if (nextFam !== prevFam) clearFamilyFields(prevFam)
-    setCategory(k)
+    setCategory(item.category)
+    setActivity(item.name)
+    setActivitySearch(item.name)
   }
-  // Same-family switches (e.g. running → cycling) reuse the same inputs, so they
-  // apply immediately. A cross-family switch only prompts when the abandoned
-  // family has data the user would lose; otherwise it switches silently.
-  const requestCategory = (k) => {
-    if (k === category) return
+  const requestActivity = (item) => {
+    if (!item) return
+    if (item.name === activity && item.category === category) return
     const prevFam = categoryFamily(category)
-    const nextFam = categoryFamily(k)
+    const nextFam = categoryFamily(item.category)
     if (nextFam === prevFam || !familyHasData(prevFam)) {
-      applyCategory(k)
+      applyActivity(item)
       return
     }
-    setPendingCategory(k)
+    setPendingActivity(item)
+  }
+  const handleActivityTyping = (value) => {
+    setActivitySearch(value)
+    setActivity(value)
+    const exact = findActivityLibraryItem(value)
+    if (!exact) return
+    if (exact.category === category) {
+      setActivity(exact.name)
+    } else if (!familyHasData(categoryFamily(category))) {
+      applyActivity(exact)
+    }
   }
 
   const buildCommitDraft = () => {
@@ -226,7 +262,7 @@ export function ConfirmCard({
   }
 
   return (
-    <div className={`wk-card${ambiguous ? ' is-ambiguous' : ''}`}>
+    <div className={`wk-card wk-confirm-card${ambiguous ? ' is-ambiguous' : ''}`}>
       <h3 className="wk-card-title">
         {title || (ambiguous ? 'Check this one' : 'Edit entry')}
         {total > 1 ? ` · ${position}/${total}` : ''}
@@ -241,13 +277,83 @@ export function ConfirmCard({
         </p>
       )}
 
-      <label className="wk-label">Activity</label>
-      <input
-        className="wk-input" value={activity}
-        onChange={(e) => setActivity(e.target.value)}
-        aria-label="Activity name" placeholder="e.g. Deadlift, Trail run"
-        enterKeyHint="next" autoComplete="off" autoCorrect="off" spellCheck="false"
-      />
+      <div className="wk-activity-picker">
+        <div className="wk-activity-head">
+          <label className="wk-label" htmlFor="wk-activity-search">Activity</label>
+          <div className="wk-activity-selected" title={`${CATEGORIES[category].label} · ${selectedMetricLabel}`}>
+            <SportIcon name={selectedIcon} color={selectedColor} size={15} />
+            <span>{selectedMetricLabel}</span>
+          </div>
+        </div>
+        <input
+          id="wk-activity-search"
+          className="wk-input wk-activity-search"
+          value={activitySearch}
+          onChange={(e) => handleActivityTyping(e.target.value)}
+          aria-label="Activity name"
+          placeholder="Search activities"
+          enterKeyHint="search" autoComplete="off" autoCorrect="off" spellCheck="false"
+        />
+        <div className="wk-activity-group-row" role="tablist" aria-label="Activity groups">
+          {ACTIVITY_GROUPS.map((group) => (
+            <button
+              key={group.key}
+              type="button"
+              className={`wk-activity-group${activityGroup === group.key ? ' is-active' : ''}`}
+              onClick={() => setActivityGroup(group.key)}
+              role="tab"
+              aria-selected={activityGroup === group.key}
+            >
+              <span>{group.label}</span>
+              <span className="wk-activity-group-count">{activityGroupCounts[group.key] || 0}</span>
+            </button>
+          ))}
+        </div>
+        <div className="wk-activity-result-count" aria-live="polite">{resultCountLabel}</div>
+        <div className="wk-activity-results" role="listbox" aria-label="Activity results">
+          {activityResults.map((item) => {
+            const active = item.name === activity && item.category === category
+            return (
+              <button
+                key={`${item.group}:${item.category}:${item.name}`}
+                type="button"
+                className={`wk-activity-option${active ? ' is-active' : ''}`}
+                onClick={() => requestActivity(item)}
+                role="option"
+                aria-selected={active}
+              >
+                <span className="wk-activity-option-icon" aria-hidden>
+                  <SportIcon name={item.icon} color={item.color} size={17} />
+                </span>
+                <span className="wk-activity-option-text">
+                  <span className="wk-activity-option-name">{item.name}</span>
+                  <span className="wk-activity-option-meta">
+                    {groupLabels.get(item.group) || 'Activity'} · {item.metricLabel}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+          {activityResults.length === 0 && activitySearch.trim() && (
+            <button
+              type="button"
+              className="wk-activity-option is-custom"
+              onClick={() => {
+                setActivity(activitySearch.trim())
+                setActivitySearch(activitySearch.trim())
+              }}
+            >
+              <span className="wk-activity-option-icon" aria-hidden>
+                <SportIcon name={selectedIcon} color={selectedColor} size={17} />
+              </span>
+              <span className="wk-activity-option-text">
+                <span className="wk-activity-option-name">{activitySearch.trim()}</span>
+                <span className="wk-activity-option-meta">Custom</span>
+              </span>
+            </button>
+          )}
+        </div>
+      </div>
 
       <div className="wk-spacer-12" />
       <div className="wk-grid-2">
@@ -267,26 +373,6 @@ export function ConfirmCard({
             aria-label="Entry time"
           />
         </div>
-      </div>
-
-      <div className="wk-spacer-12" />
-      <label className="wk-label">Category</label>
-      <div className="wk-chip-row">
-        {CATEGORY_KEYS.map((k) => {
-          const active = k === category
-          const color = CATEGORIES[k].color
-          return (
-            <button
-              key={k} className="wk-chip"
-              style={active ? { borderColor: color, background: `${color}22`, color: 'var(--text)' } : undefined}
-              onClick={() => requestCategory(k)}
-              aria-label={`Category ${CATEGORIES[k].label}`}
-              aria-pressed={active}
-            >
-              <SportIcon name={CATEGORIES[k].icon} color={CATEGORIES[k].color} size={16} />{CATEGORIES[k].label}
-            </button>
-          )
-        })}
       </div>
 
       <div className="wk-spacer-14" />
@@ -422,13 +508,13 @@ export function ConfirmCard({
       <div className="wk-spacer-10" />
       <button className="wk-btn-secondary is-block" onClick={onCancel} aria-label="Discard entry">Discard</button>
 
-      {pendingCategory && (
+      {pendingActivity && (
         <ConfirmModal
-          title={`Switch to ${CATEGORIES[pendingCategory].label}?`}
-          body={`${CATEGORIES[pendingCategory].label} logs different metrics, so the ${CATEGORIES[category].label.toLowerCase()} details you entered will be cleared.`}
+          title={`Switch to ${pendingActivity.name}?`}
+          body={`${pendingActivity.name} uses ${pendingActivity.metricLabel} metrics, so the ${CATEGORIES[category].label.toLowerCase()} details you entered will be cleared.`}
           confirmLabel="Switch and clear"
-          onConfirm={() => { applyCategory(pendingCategory); setPendingCategory(null) }}
-          onCancel={() => setPendingCategory(null)}
+          onConfirm={() => { applyActivity(pendingActivity); setPendingActivity(null) }}
+          onCancel={() => setPendingActivity(null)}
         />
       )}
     </div>

@@ -82,13 +82,18 @@ function MetricCell({ label, ariaLabel, displayValue, displayUnit, units, onComm
 // new write path, no new concurrency surface. Each cell coalesces its keystrokes
 // (commit on blur/Enter) and re-derives the full draft from the committed entry
 // at commit time, so a co-writer's poll update is never masked by stale input.
-export function SessionDraftCard({ entry, onDelete, onEditEntry }) {
+export function SessionDraftCard({ entry, previousEntry = null, onDelete, onEditEntry, onSetCompletion }) {
   const cat = CATEGORIES[entry.category] || CATEGORIES.other
   const icon = entry.icon || cat.icon
   const color = sportIconColor(icon, entry.category)
   const fam = categoryFamily(entry.category)
   const missingReason = sessionEntryMissing(entry)
   const incomplete = !!missingReason
+  const previousDraft = previousEntry ? draftFromStoredEntry(previousEntry) : null
+  const previousSets = previousEntry?.metrics?.sets || []
+  const completedSets = fam === 'strength'
+    ? (entry.metrics?.sets || []).filter((set) => set.completed === true).length
+    : 0
 
   const emitStrengthSet = (setIndex, patch) => {
     if (!onEditEntry) return
@@ -102,6 +107,18 @@ export function SessionDraftCard({ entry, onDelete, onEditEntry }) {
     onEditEntry(entry.id, { ...draft.metrics, ...patchMetrics })
   }
 
+  const reusePrevious = () => {
+    if (!onEditEntry || !previousDraft?.metrics?.sets?.length) return
+    onEditEntry(entry.id, {
+      ...draftFromStoredEntry(entry).metrics,
+      sets: previousDraft.metrics.sets.map((set) => ({
+        ...set,
+        completed: false,
+        completedAt: null,
+      })),
+    })
+  }
+
   const distanceDisplay = metresToDisplay(entry.metrics?.distance_m)
   const durationDisplay = secondsToDisplay(entry.metrics?.duration_s)
 
@@ -113,7 +130,12 @@ export function SessionDraftCard({ entry, onDelete, onEditEntry }) {
       <div className="wk-entry-body">
         <div className="wk-entry-top">
           <h4 className="wk-entry-name">{entry.activity}</h4>
-          <span className="wk-entry-time">{cat.label}</span>
+          <span className="wk-entry-time">
+            {cat.label}
+            {fam === 'strength' && previousSets.length > 0 && (
+              <button type="button" className="wk-use-last" onClick={reusePrevious}>Use last</button>
+            )}
+          </span>
         </div>
 
         {fam === 'strength' ? (
@@ -124,21 +146,47 @@ export function SessionDraftCard({ entry, onDelete, onEditEntry }) {
               const weightVal = set.weight_kg == null ? '' : String(fromKg(set.weight_kg, unit))
               const setIncomplete =
                 set.reps == null || set.reps <= 0 || set.weight_kg == null || set.weight_kg <= 0
+              const previous = previousSets[i] || previousSets[previousSets.length - 1] || null
+              const previousUnit = previous?.unit === 'lb' ? 'lb' : 'kg'
+              const previousLabel = previous
+                ? `${previous.reps ?? '—'} × ${previous.weight_kg == null ? '—' : fromKg(previous.weight_kg, previousUnit)}${previousUnit}`
+                : null
               return (
-                <div key={i} className={`wk-worksheet-row${setIncomplete ? ' is-incomplete' : ''}`}>
-                  <span className="wk-set-index">{i + 1}</span>
-                  <DraftCell
-                    className="wk-input" type="number" inputMode="numeric" value={repsVal}
-                    onCommit={(v) => emitStrengthSet(i, { reps: v })}
-                    aria-label={`Set ${i + 1} reps`} placeholder="reps"
-                  />
-                  <span className="wk-worksheet-x" aria-hidden>×</span>
-                  <DraftCell
-                    className="wk-input" type="number" inputMode="decimal" value={weightVal}
-                    onCommit={(v) => emitStrengthSet(i, { weight: v })}
-                    aria-label={`Set ${i + 1} weight in ${unit}`} placeholder={unit}
-                  />
-                  <span className="wk-worksheet-unit">{unit}</span>
+                <div key={i} className={`wk-set-block${set.completed ? ' is-complete' : ''}`}>
+                  <div className={`wk-worksheet-row${setIncomplete ? ' is-incomplete' : ''}`}>
+                    <button
+                      type="button"
+                      className="wk-set-check"
+                      aria-pressed={set.completed === true}
+                      aria-label={`${set.completed ? 'Mark' : 'Complete'} set ${i + 1} of ${entry.activity}`}
+                      onClick={() => {
+                        const completed = set.completed !== true
+                        emitStrengthSet(i, { completed, completedAt: completed ? Date.now() : null })
+                        onSetCompletion?.({ entryId: entry.id, setIndex: i, completed })
+                      }}
+                    >
+                      <span aria-hidden>{set.completed ? '✓' : ''}</span>
+                    </button>
+                    <span className="wk-set-index">{i + 1}</span>
+                    <DraftCell
+                      className="wk-input" type="number" inputMode="numeric" value={repsVal}
+                      onCommit={(v) => emitStrengthSet(i, { reps: v })}
+                      aria-label={`Set ${i + 1} reps`} placeholder="reps"
+                    />
+                    <span className="wk-worksheet-x" aria-hidden>×</span>
+                    <DraftCell
+                      className="wk-input" type="number" inputMode="decimal" value={weightVal}
+                      onCommit={(v) => emitStrengthSet(i, { weight: v })}
+                      aria-label={`Set ${i + 1} weight in ${unit}`} placeholder={unit}
+                    />
+                    <span className="wk-worksheet-unit">{unit}</span>
+                  </div>
+                  {previousLabel && (
+                    <div className="wk-set-previous">
+                      <span>Previous</span>
+                      <span>{previousLabel}</span>
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -179,7 +227,12 @@ export function SessionDraftCard({ entry, onDelete, onEditEntry }) {
 
         {incomplete
           ? <p className="wk-entry-meta wk-current-session-missing">Missing: {missingReason}.</p>
-          : <p className="wk-entry-meta">{summarizeMetrics(entry) || cat.label}</p>}
+          : <p className="wk-entry-meta">
+              {fam === 'strength' && completedSets > 0
+                ? `${completedSets}/${entry.metrics?.sets?.length || 0} complete · `
+                : ''}
+              {summarizeMetrics(entry) || cat.label}
+            </p>}
       </div>
       <div className="wk-entry-actions">
         <button
