@@ -66,9 +66,9 @@ export function InsightsTab({ entries }) {
   }
 
   return (
-    <div>
+    <div className="wk-insights-grid">
       <div className="wk-chart-card">
-        <h3 className="wk-chart-title">Streak</h3>
+        <h2 className="wk-chart-title">Streak</h2>
         <p className="wk-chart-sub">Consecutive days with at least one logged activity.</p>
         <div className="wk-streak-value">
           {streak} <span className="wk-streak-unit">day{streak === 1 ? '' : 's'}</span>
@@ -78,7 +78,7 @@ export function InsightsTab({ entries }) {
 
       {prs.length > 0 && (
         <div className="wk-chart-card">
-          <h3 className="wk-chart-title">Strength PRs</h3>
+          <h2 className="wk-chart-title">Strength PRs</h2>
           <p className="wk-chart-sub">Best estimated 1RM per lift.</p>
           <table className="wk-pr-table">
             <thead>
@@ -111,7 +111,7 @@ export function InsightsTab({ entries }) {
 
       {cardio.length > 0 && (
         <div className="wk-chart-card">
-          <h3 className="wk-chart-title">Cardio bests</h3>
+          <h2 className="wk-chart-title">Cardio bests</h2>
           <p className="wk-chart-sub">Longest distance and duration per activity.</p>
           <table className="wk-pr-table">
             <thead>
@@ -144,7 +144,7 @@ export function InsightsTab({ entries }) {
 
       {exercises.length > 0 && (
         <div className="wk-chart-card">
-          <h3 className="wk-chart-title">Exercises</h3>
+          <h2 className="wk-chart-title">Exercises</h2>
           <p className="wk-chart-sub">Tap an exercise for its trend, records, and history.</p>
           <table className="wk-pr-table">
             <thead>
@@ -171,13 +171,13 @@ export function InsightsTab({ entries }) {
       )}
 
       <div className="wk-chart-card">
-        <h3 className="wk-chart-title">Weekly volume</h3>
+        <h2 className="wk-chart-title">Weekly volume</h2>
         <p className="wk-chart-sub">Strength = kg-reps, cardio = km, other = min — last 6 weeks.</p>
         <CategoryVolumeBars weeks={weeks} />
       </div>
 
       <div className="wk-chart-card">
-        <h3 className="wk-chart-title">Category stats</h3>
+        <h2 className="wk-chart-title">Category stats</h2>
         <p className="wk-chart-sub">Sessions and useful totals by activity type.</p>
         <CategoryStats stats={stats} />
       </div>

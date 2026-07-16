@@ -844,6 +844,15 @@ button.wk-pill { cursor: pointer; }
   .wk-confirm-card { padding: 18px; }
 }
 
+@media (min-width: 900px) {
+  .wk-insights-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .wk-insights-grid > .wk-chart-card { margin-bottom: 0; min-width: 0; }
+}
+
 @media (max-width: 420px) {
   .wk-current-session-head { align-items: flex-start; }
   .wk-current-session-actions { flex-direction: column-reverse; align-items: flex-end; gap: 2px; }

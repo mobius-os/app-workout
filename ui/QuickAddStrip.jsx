@@ -6,7 +6,7 @@ export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
   const recents = useMemo(() => recentExercises(entries, 3), [entries])
   if (!entries || entries.length === 0) {
     return (
-      <div className="wk-quick-add is-empty">
+      <section className="wk-quick-add is-empty" aria-label="Add activity">
         <div className="wk-quick-add-label">
           <span>Add activity</span>
         </div>
@@ -21,11 +21,11 @@ export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
             <span aria-hidden>›</span>
           </button>
         )}
-      </div>
+      </section>
     )
   }
   return (
-    <div className="wk-quick-add">
+    <section className="wk-quick-add" aria-label="Add activity">
       <div className="wk-quick-add-label">
         <span>Add activity</span>
         <button className="wk-quick-add-btn" style={{ marginLeft: 0 }}
@@ -34,6 +34,7 @@ export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
       <div className="wk-quick-chip-row">
         {recents.map((ex) => (
           <button
+            type="button"
             key={ex.key}
             className="wk-quick-chip"
             onClick={() => onQuickAdd(ex, entries)}
@@ -51,6 +52,6 @@ export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
           <span aria-hidden>›</span>
         </button>
       )}
-    </div>
+    </section>
   )
 }
