@@ -129,7 +129,7 @@ export function SessionDraftCard({ entry, previousEntry = null, onDelete, onEdit
       </div>
       <div className="wk-entry-body">
         <div className="wk-entry-top">
-          <h4 className="wk-entry-name">{entry.activity}</h4>
+          <h3 className="wk-entry-name">{entry.activity}</h3>
           <span className="wk-entry-time">
             {cat.label}
             {fam === 'strength' && previousSets.length > 0 && (

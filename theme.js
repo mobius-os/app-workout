@@ -433,11 +433,11 @@ export const CSS = `
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
 .wk-worksheet-row {
-  display: grid; grid-template-columns: 36px 20px minmax(48px, 1fr) 12px minmax(48px, 1fr) 22px;
+  display: grid; grid-template-columns: 44px 20px minmax(48px, 1fr) 12px minmax(48px, 1fr) 22px;
   align-items: center; gap: 6px;
 }
 .wk-set-check {
-  width: 36px; height: 36px; padding: 0; border-radius: 8px;
+  width: 44px; height: 44px; padding: 0; border-radius: 8px;
   border: 1px solid var(--border); background: var(--surface); color: var(--accent);
   font-family: var(--font); font-size: 16px; font-weight: 900; cursor: pointer;
 }
@@ -448,7 +448,7 @@ export const CSS = `
   font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
 }
 .wk-use-last {
-  min-height: 32px; margin-left: 7px; padding: 4px 8px;
+  min-height: 44px; margin-left: 7px; padding: 4px 8px;
   border: 0; border-radius: 7px;
   background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
   font-family: var(--font); font-size: 11px; font-weight: 800; cursor: pointer;
@@ -536,6 +536,12 @@ export const CSS = `
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 2px;
+}
+.wk-activity-more {
+  width: 100%; min-height: 44px; margin-top: 8px; padding: 8px 12px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface2, var(--surface)); color: var(--accent);
+  font: 700 12px/1.2 var(--font); cursor: pointer;
 }
 .wk-activity-option {
   min-width: 0;
@@ -814,7 +820,7 @@ button.wk-pill { cursor: pointer; }
 .wk-quick-add.is-empty .wk-quick-add-label { justify-content: center; }
 .wk-quick-chip {
   display: inline-flex; align-items: center; gap: 6px;
-  min-height: 42px; padding: 7px 11px; border-radius: 10px;
+  min-height: 44px; padding: 7px 11px; border-radius: 10px;
   border: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text); font-family: var(--font); font-size: 13px; font-weight: 600;
   cursor: pointer; touch-action: manipulation; user-select: none;
@@ -827,7 +833,7 @@ button.wk-pill { cursor: pointer; }
   display: flex; gap: 6px; flex-wrap: wrap;
 }
 .wk-quick-add-btn {
-  min-height: 40px; padding: 7px 13px; border-radius: 10px;
+  min-height: 44px; padding: 7px 13px; border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
   background: color-mix(in srgb, var(--accent) 9%, transparent);
   color: var(--accent); font-family: var(--font); font-size: 13px; font-weight: 700;
@@ -866,9 +872,9 @@ button.wk-pill { cursor: pointer; }
   .wk-entry-card.is-draft .wk-entry-time { font-size: 0; }
   .wk-entry-card.is-draft .wk-use-last { margin-left: 4px; font-size: 11px; }
   .wk-entry-card.is-draft .wk-entry-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .wk-worksheet-row { grid-template-columns: 36px 18px minmax(42px, 1fr) 10px minmax(42px, 1fr) 20px; gap: 4px; }
-  .wk-worksheet-row .wk-input { min-height: 40px; padding: 8px 5px; text-align: center; }
-  .wk-set-previous { margin-left: 58px; margin-right: 24px; }
+  .wk-worksheet-row { grid-template-columns: 44px 18px minmax(42px, 1fr) 10px minmax(42px, 1fr) 20px; gap: 4px; }
+  .wk-worksheet-row .wk-input { min-height: 44px; padding: 8px 5px; text-align: center; }
+  .wk-set-previous { margin-left: 66px; margin-right: 24px; }
 }
 
 /* mobius-ui:ReducedMotion v1 -- honor the OS reduce-motion setting */

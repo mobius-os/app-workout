@@ -77,9 +77,9 @@ export function CurrentSessionPanel({
     <section className="wk-current-session is-live" aria-label="Current session">
       <div className="wk-current-session-head">
         <div style={{ minWidth: 0 }}>
-          <h3 className="wk-current-session-title">
+          <h2 className="wk-current-session-title">
             <span className="wk-live-dot" aria-hidden />Live session
-          </h3>
+          </h2>
           <p className="wk-current-session-sub">
             {entries.length > 0
               ? `${entries.length} ${entries.length === 1 ? 'activity' : 'activities'}${elapsed ? ` · ${elapsed}` : ''}`

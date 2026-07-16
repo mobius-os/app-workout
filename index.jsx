@@ -939,8 +939,9 @@ export default function App({ appId, token }) {
                 ambiguous={false}
                 clarification=""
                 initialTs={Date.now()}
-                title="Log exercise"
-                commitLabel="Save to log"
+                title="Add exercise"
+                commitLabel="Add to session"
+                helperText="Set the details now or finish them in the worksheet. It reaches History when you finish the session."
                 lastEntry={lastEntryForQuickAdd}
                 onCommit={commitQuickAdd}
                 onCancel={() => {

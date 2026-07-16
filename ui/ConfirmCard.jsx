@@ -10,13 +10,14 @@ import { SportIcon } from './SportIcon.jsx'
 
 export function ConfirmCard({
   draft, ambiguous, clarification, onCommit, onCancel, position = 1, total = 1,
-  initialTs = Date.now(), title = null, commitLabel = null,
+  initialTs = Date.now(), title = null, commitLabel = null, helperText = null,
   lastEntry = null,
 }) {
   const [category, setCategory] = useState(draft.category)
   const [activity, setActivity] = useState(draft.activity)
   const [activitySearch, setActivitySearch] = useState(draft.activity)
   const [activityGroup, setActivityGroup] = useState('all')
+  const [showAllActivities, setShowAllActivities] = useState(false)
   const fam = categoryFamily(category)
   const selectedIcon = sportIconKey(activity, category)
   const selectedColor = sportIconColor(selectedIcon, category)
@@ -31,13 +32,16 @@ export function ConfirmCard({
   const activityResults = useMemo(
     () => searchActivityLibrary(activitySearch, {
       group: activityGroup,
-      limit: activitySearch.trim() ? 48 : 96,
+      limit: activitySearch.trim() ? 48 : showAllActivities ? 96 : 12,
     }),
-    [activityGroup, activitySearch],
+    [activityGroup, activitySearch, showAllActivities],
   )
+  const groupActivityCount = activityGroupCounts[activityGroup] || activityResults.length
   const resultCountLabel = activitySearch.trim()
     ? `${activityResults.length} ${activityResults.length === 1 ? 'match' : 'matches'}`
-    : `${activityGroupCounts[activityGroup] || activityResults.length} activities`
+    : showAllActivities || groupActivityCount <= activityResults.length
+      ? `${groupActivityCount} activities`
+      : `${activityResults.length} of ${groupActivityCount} activities`
   const initialDate = new Date(initialTs)
   const [dateValue, setDateValue] = useState(() => localDate(initialDate))
   const [timeValue, setTimeValue] = useState(() => {
@@ -197,6 +201,7 @@ export function ConfirmCard({
   const handleActivityTyping = (value) => {
     setActivitySearch(value)
     setActivity(value)
+    setShowAllActivities(false)
     const exact = findActivityLibraryItem(value)
     if (!exact) return
     if (exact.category === category) {
@@ -263,17 +268,17 @@ export function ConfirmCard({
 
   return (
     <div className={`wk-card wk-confirm-card${ambiguous ? ' is-ambiguous' : ''}`}>
-      <h3 className="wk-card-title">
+      <h2 className="wk-card-title">
         {title || (ambiguous ? 'Check this one' : 'Edit entry')}
         {total > 1 ? ` · ${position}/${total}` : ''}
-      </h3>
+      </h2>
       {ambiguous && clarification ? (
         <p className="wk-card-sub">{clarification}</p>
       ) : (
         <p className="wk-card-sub">
-          {total > 1
+          {helperText || (total > 1
             ? 'Tweak anything, then save this part and review the next one.'
-            : 'Tweak anything, then save it to your log.'}
+            : 'Tweak anything, then add it to your session.')}
         </p>
       )}
 
@@ -300,7 +305,10 @@ export function ConfirmCard({
               key={group.key}
               type="button"
               className={`wk-activity-group${activityGroup === group.key ? ' is-active' : ''}`}
-              onClick={() => setActivityGroup(group.key)}
+              onClick={() => {
+                setActivityGroup(group.key)
+                setShowAllActivities(false)
+              }}
               role="tab"
               aria-selected={activityGroup === group.key}
             >
@@ -353,6 +361,15 @@ export function ConfirmCard({
             </button>
           )}
         </div>
+        {!activitySearch.trim() && !showAllActivities && groupActivityCount > activityResults.length && (
+          <button
+            type="button"
+            className="wk-activity-more"
+            onClick={() => setShowAllActivities(true)}
+          >
+            View all {groupActivityCount} activities
+          </button>
+        )}
       </div>
 
       <div className="wk-spacer-12" />
@@ -497,10 +514,10 @@ export function ConfirmCard({
       )}
 
       <div className="wk-spacer-16" />
-      <button className="wk-btn-primary" onClick={handleCommit} aria-label="Save entry"
+      <button className="wk-btn-primary" onClick={handleCommit} aria-label={commitLabel || 'Add entry'}
         disabled={!!saveBlockedReason}
-        title={saveBlockedReason ? `Missing: ${saveBlockedReason}` : 'Save entry'}>
-        {commitLabel || (total > 1 && position < total ? 'Save and review next' : 'Save to log')}
+        title={saveBlockedReason ? `Missing: ${saveBlockedReason}` : commitLabel || 'Add entry'}>
+        {commitLabel || (total > 1 && position < total ? 'Save and review next' : 'Add to session')}
       </button>
       {saveBlockedReason && (
         <p className="wk-current-session-missing">Missing: {saveBlockedReason}.</p>
