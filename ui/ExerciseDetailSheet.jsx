@@ -1,14 +1,42 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { CATEGORIES } from '../logic.js'
 import { detailHistorySummary, detailRecordTiles, detailTrend, fmtWeight, shortDate } from '../format.js'
 import { Sparkline } from './Sparkline.jsx'
 import { SportIcon } from './SportIcon.jsx'
 
 export function ExerciseDetailSheet({ detail, onClose }) {
+  const sheetRef = useRef(null)
+  const closeRef = useRef(null)
+
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    const previousFocus = document.activeElement
+    closeRef.current?.focus()
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onClose()
+        return
+      }
+      if (e.key !== 'Tab') return
+      const focusable = [...(sheetRef.current?.querySelectorAll(
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      ) || [])]
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.requestAnimationFrame(() => previousFocus?.focus?.())
+    }
   }, [onClose])
 
   const trend = detailTrend(detail)
@@ -20,7 +48,7 @@ export function ExerciseDetailSheet({ detail, onClose }) {
 
   return (
     <div className="wk-sheet-scrim" onClick={onClose} role="presentation">
-      <div className="wk-sheet" onClick={(e) => e.stopPropagation()}
+      <div ref={sheetRef} className="wk-sheet" onClick={(e) => e.stopPropagation()}
         role="dialog" aria-modal="true" aria-label={`${detail.activity} details`}>
         <div className="wk-sheet-head">
           <div className="wk-sheet-head-brand">
@@ -34,7 +62,7 @@ export function ExerciseDetailSheet({ detail, onClose }) {
               </p>
             </div>
           </div>
-          <button className="wk-icon-btn" onClick={onClose} aria-label="Close" title="Close">×</button>
+          <button ref={closeRef} className="wk-icon-btn" onClick={onClose} aria-label="Close" title="Close">×</button>
         </div>
 
         <div className="wk-sheet-body">

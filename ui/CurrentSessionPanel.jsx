@@ -48,12 +48,16 @@ export function CurrentSessionPanel({
   }, [])
   const [restTimer, setRestTimer] = useState(null) // { entryId, setIndex, endsAt }
   const [restNow, setRestNow] = useState(() => Date.now())
+  const [restAnnouncement, setRestAnnouncement] = useState('')
   useEffect(() => {
     if (!restTimer) return undefined
     const tick = () => {
       const next = Date.now()
       setRestNow(next)
-      if (next >= restTimer.endsAt) setRestTimer(null)
+      if (next >= restTimer.endsAt) {
+        setRestTimer(null)
+        setRestAnnouncement('Rest complete')
+      }
     }
     tick()
     const timer = setInterval(tick, 1000)
@@ -62,6 +66,7 @@ export function CurrentSessionPanel({
   const restRemaining = restTimer ? Math.max(0, (restTimer.endsAt - restNow) / 1000) : 0
   const handleSetCompletion = ({ entryId, setIndex, completed }) => {
     if (completed) {
+      setRestAnnouncement('')
       setRestNow(Date.now())
       setRestTimer({ entryId, setIndex, endsAt: Date.now() + 90000 })
     } else if (restTimer?.entryId === entryId && restTimer?.setIndex === setIndex) {
@@ -113,7 +118,7 @@ export function CurrentSessionPanel({
         </div>
       </div>
       {restTimer && (
-        <div className="wk-rest-timer" aria-label={`Rest timer ${restClock(restRemaining)} remaining`}>
+        <div className="wk-rest-timer" role="timer" aria-live="off" aria-label={`Rest timer ${restClock(restRemaining)} remaining`}>
           <div>
             <span className="wk-rest-label">Rest</span>
             <strong className="wk-rest-value">{restClock(restRemaining)}</strong>
@@ -124,6 +129,7 @@ export function CurrentSessionPanel({
           </div>
         </div>
       )}
+      <span className="wk-sr-only" role="status" aria-live="polite" aria-atomic="true">{restAnnouncement}</span>
       {entries.length > 0 ? (
         <div className="wk-current-session-list">
           {entries.map((entry) => (
@@ -141,7 +147,7 @@ export function CurrentSessionPanel({
         <div className="wk-current-session-empty">Choose an activity, or tell the chat what you did.</div>
       )}
       {missing.length > 0 && (
-        <p className="wk-current-session-missing">Missing: {missing.join(', ')}.</p>
+        <p className="wk-current-session-missing">Complete before finishing: {missing.join(', ')}.</p>
       )}
     </section>
   )

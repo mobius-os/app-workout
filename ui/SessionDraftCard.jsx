@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import {
-  CATEGORIES, categoryFamily, fromKg, sportIconColor, summarizeMetrics, sessionEntryMissing,
+  CATEGORIES, categoryFamily, fromKg, sportIconColor, summarizeMetrics,
 } from '../logic.js'
 import { secondsToDisplay, metresToDisplay, draftFromStoredEntry } from '../format.js'
 import { SportIcon } from './SportIcon.jsx'
@@ -87,8 +87,6 @@ export function SessionDraftCard({ entry, previousEntry = null, onDelete, onEdit
   const icon = entry.icon || cat.icon
   const color = sportIconColor(icon, entry.category)
   const fam = categoryFamily(entry.category)
-  const missingReason = sessionEntryMissing(entry)
-  const incomplete = !!missingReason
   const previousDraft = previousEntry ? draftFromStoredEntry(previousEntry) : null
   const previousSets = previousEntry?.metrics?.sets || []
   const completedSets = fam === 'strength'
@@ -123,7 +121,7 @@ export function SessionDraftCard({ entry, previousEntry = null, onDelete, onEdit
   const durationDisplay = secondsToDisplay(entry.metrics?.duration_s)
 
   return (
-    <div className={`wk-entry-card is-draft${incomplete ? ' is-incomplete' : ''}`}>
+    <div className="wk-entry-card is-draft">
       <div className="wk-entry-icon" style={{ background: `${color}22`, border: `1px solid ${color}55` }} aria-hidden>
         <SportIcon name={icon} color={color} size={18} />
       </div>
@@ -144,8 +142,6 @@ export function SessionDraftCard({ entry, previousEntry = null, onDelete, onEdit
               const unit = set.unit === 'lb' ? 'lb' : 'kg'
               const repsVal = set.reps == null ? '' : String(set.reps)
               const weightVal = set.weight_kg == null ? '' : String(fromKg(set.weight_kg, unit))
-              const setIncomplete =
-                set.reps == null || set.reps <= 0 || set.weight_kg == null || set.weight_kg <= 0
               const previous = previousSets[i] || previousSets[previousSets.length - 1] || null
               const previousUnit = previous?.unit === 'lb' ? 'lb' : 'kg'
               const previousLabel = previous
@@ -153,7 +149,7 @@ export function SessionDraftCard({ entry, previousEntry = null, onDelete, onEdit
                 : null
               return (
                 <div key={i} className={`wk-set-block${set.completed ? ' is-complete' : ''}`}>
-                  <div className={`wk-worksheet-row${setIncomplete ? ' is-incomplete' : ''}`}>
+                  <div className="wk-worksheet-row">
                     <button
                       type="button"
                       className="wk-set-check"
@@ -225,14 +221,12 @@ export function SessionDraftCard({ entry, previousEntry = null, onDelete, onEdit
           </div>
         )}
 
-        {incomplete
-          ? <p className="wk-entry-meta wk-current-session-missing">Missing: {missingReason}.</p>
-          : <p className="wk-entry-meta">
-              {fam === 'strength' && completedSets > 0
-                ? `${completedSets}/${entry.metrics?.sets?.length || 0} complete · `
-                : ''}
-              {summarizeMetrics(entry) || cat.label}
-            </p>}
+        <p className="wk-entry-meta">
+          {fam === 'strength' && completedSets > 0
+            ? `${completedSets}/${entry.metrics?.sets?.length || 0} complete · `
+            : ''}
+          {summarizeMetrics(entry) || 'Details pending'}
+        </p>
       </div>
       <div className="wk-entry-actions">
         <button

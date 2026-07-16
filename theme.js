@@ -392,7 +392,6 @@ export const CSS = `
 .wk-entry-card.is-draft .wk-worksheet,
 .wk-entry-card.is-draft .wk-entry-meta { grid-column: 1 / -1; }
 .wk-entry-card.is-draft .wk-entry-icon { margin-top: 2px; }
-.wk-entry-card.is-incomplete { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .wk-worksheet { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
 .wk-set-block {
   padding: 6px; border-radius: 9px;
@@ -422,16 +421,10 @@ export const CSS = `
   background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
   font-family: var(--font); font-size: 11px; font-weight: 800; cursor: pointer;
 }
-.wk-worksheet-row.is-incomplete .wk-input {
-  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
-}
 .wk-worksheet-x { text-align: center; color: var(--muted); font-size: 13px; font-weight: 700; }
 .wk-worksheet-unit { font-size: 12px; color: var(--muted); font-weight: 600; }
 .wk-worksheet-field { display: grid; grid-template-columns: 78px 1fr; gap: 8px; align-items: center; }
 .wk-worksheet-label { font-size: 12px; color: var(--muted); font-weight: 600; }
-.wk-entry-card.is-incomplete .wk-entry-meta.wk-current-session-missing {
-  padding: 0; color: var(--danger); font-weight: 600;
-}
 
 /* Activity library picker — manual logging is search-first over a broad list,
    while the storage category stays an internal analytics detail. */
