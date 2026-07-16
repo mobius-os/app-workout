@@ -192,6 +192,7 @@ export default function App({ appId, token }) {
   // or a new logging flow starts, so the useful comparison is not a 3s toast.
   const [savedRecap, setSavedRecap] = useState(null)
   const bodyRef = useRef(null)
+  const tabRefs = useRef([])
   // Chat is HIDDEN by default; the header toggle opens it as the bottom pane of
   // a draggable split (ported from app-latex). chatRatio is the chat pane's
   // fraction of the body height; both persist per app.
@@ -207,6 +208,19 @@ export default function App({ appId, token }) {
       bodyRef.current?.querySelector('.wk-scroll')?.scrollTo({ top: 0 })
     })
   }, [tab])
+
+  const onTabKeyDown = useCallback((event, index) => {
+    const order = ['session', 'history', 'insights']
+    let nextIndex = index
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % order.length
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + order.length) % order.length
+    else if (event.key === 'Home') nextIndex = 0
+    else if (event.key === 'End') nextIndex = order.length - 1
+    else return
+    event.preventDefault()
+    selectTab(order[nextIndex])
+    requestAnimationFrame(() => tabRefs.current[nextIndex]?.focus())
+  }, [selectTab])
 
   const quickActions = useMemo(() => [
     { label: 'Repeat my last workout', prompt: 'Copy my most recent logged session exactly into today’s editable draft. Reset set completion, do not progress loads, and do not commit it.' },
@@ -896,18 +910,24 @@ export default function App({ appId, token }) {
       </div>
 
       {!editingEntry && !quickAddDraft && (
-        <nav className="wk-tabbar" aria-label="Workout sections">
-          <button className={`wk-tab-btn${tab === 'session' ? ' is-active' : ''}`} onClick={() => selectTab('session')}
-            aria-current={tab === 'session' ? 'page' : undefined} aria-label="Session">
+        <nav className="wk-tabbar" role="tablist" aria-label="Workout sections">
+          <button ref={(node) => { tabRefs.current[0] = node }} id="wk-tab-session" type="button" role="tab"
+            className={`wk-tab-btn${tab === 'session' ? ' is-active' : ''}`} onClick={() => selectTab('session')}
+            onKeyDown={(event) => onTabKeyDown(event, 0)} aria-selected={tab === 'session'}
+            aria-controls="wk-panel-session" tabIndex={tab === 'session' ? 0 : -1} aria-label="Session">
             <span className="wk-tab-icon" aria-hidden><SportIcon name="stopwatch" size={15} /></span>Session
           </button>
-          <button className={`wk-tab-btn${tab === 'history' ? ' is-active' : ''}`} onClick={() => selectTab('history')}
-            aria-current={tab === 'history' ? 'page' : undefined} aria-label="History">
+          <button ref={(node) => { tabRefs.current[1] = node }} id="wk-tab-history" type="button" role="tab"
+            className={`wk-tab-btn${tab === 'history' ? ' is-active' : ''}`} onClick={() => selectTab('history')}
+            onKeyDown={(event) => onTabKeyDown(event, 1)} aria-selected={tab === 'history'}
+            aria-controls="wk-panel-history" tabIndex={tab === 'history' ? 0 : -1} aria-label="History">
             <span className="wk-tab-icon" aria-hidden><SportIcon name="history" size={15} /></span>History
           </button>
-          <button className={`wk-tab-btn${tab === 'insights' ? ' is-active' : ''}`}
-            onClick={() => selectTab('insights')}
-            aria-current={tab === 'insights' ? 'page' : undefined} aria-label="Insights">
+          <button ref={(node) => { tabRefs.current[2] = node }} id="wk-tab-insights" type="button" role="tab"
+            className={`wk-tab-btn${tab === 'insights' ? ' is-active' : ''}`}
+            onClick={() => selectTab('insights')} onKeyDown={(event) => onTabKeyDown(event, 2)}
+            aria-selected={tab === 'insights'} aria-controls="wk-panel-insights"
+            tabIndex={tab === 'insights' ? 0 : -1} aria-label="Insights">
             <span className="wk-tab-icon" aria-hidden><SportIcon name="chart-bar" size={15} /></span>Insights
           </button>
         </nav>
@@ -921,7 +941,12 @@ export default function App({ appId, token }) {
           : undefined}
       >
         <div className="wk-scroll">
-          <div className="wk-inner">
+          <div
+            className="wk-inner"
+            role={!editingEntry && !quickAddDraft ? 'tabpanel' : undefined}
+            id={!editingEntry && !quickAddDraft ? `wk-panel-${tab}` : undefined}
+            aria-labelledby={!editingEntry && !quickAddDraft ? `wk-tab-${tab}` : undefined}
+          >
             {editingEntry ? (
               <ConfirmCard
                 draft={draftFromStoredEntry(editingEntry)}

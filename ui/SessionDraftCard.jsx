@@ -57,7 +57,7 @@ function MetricCell({ label, ariaLabel, displayValue, displayUnit, units, onComm
           onChange={(e) => setValue(e.target.value)}
           onBlur={() => { activeRef.current = false; commit(value, unit) }}
           onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-          aria-label={ariaLabel} placeholder={displayUnit}
+          aria-label={ariaLabel} placeholder={displayUnit} min="0"
         />
         <select
           className="wk-input" value={unit}
@@ -154,7 +154,7 @@ export function SessionDraftCard({ entry, previousEntry = null, onDelete, onEdit
                       type="button"
                       className="wk-set-check"
                       aria-pressed={set.completed === true}
-                      aria-label={`${set.completed ? 'Mark' : 'Complete'} set ${i + 1} of ${entry.activity}`}
+                      aria-label={`${set.completed ? 'Mark incomplete' : 'Complete'} set ${i + 1} of ${entry.activity}`}
                       onClick={() => {
                         const completed = set.completed !== true
                         emitStrengthSet(i, { completed, completedAt: completed ? Date.now() : null })
@@ -167,13 +167,13 @@ export function SessionDraftCard({ entry, previousEntry = null, onDelete, onEdit
                     <DraftCell
                       className="wk-input" type="number" inputMode="numeric" value={repsVal}
                       onCommit={(v) => emitStrengthSet(i, { reps: v })}
-                      aria-label={`Set ${i + 1} reps`} placeholder="reps"
+                      aria-label={`Set ${i + 1} reps`} placeholder="reps" min="0" step="1"
                     />
                     <span className="wk-worksheet-x" aria-hidden>×</span>
                     <DraftCell
                       className="wk-input" type="number" inputMode="decimal" value={weightVal}
                       onCommit={(v) => emitStrengthSet(i, { weight: v })}
-                      aria-label={`Set ${i + 1} weight in ${unit}`} placeholder={unit}
+                      aria-label={`Set ${i + 1} weight in ${unit}`} placeholder={unit} min="0" step="any"
                     />
                     <span className="wk-worksheet-unit">{unit}</span>
                   </div>
@@ -230,6 +230,7 @@ export function SessionDraftCard({ entry, previousEntry = null, onDelete, onEdit
       </div>
       <div className="wk-entry-actions">
         <button
+          type="button"
           className="wk-icon-btn"
           onClick={() => onDelete(entry.id)}
           aria-label={`Remove ${entry.activity} from current session`}

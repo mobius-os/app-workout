@@ -11,7 +11,7 @@ export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
           <span>Add activity</span>
         </div>
         <div className="wk-quick-chip-row">
-          <button className="wk-quick-add-btn" onClick={() => onQuickAdd(null, null)}
+          <button type="button" className="wk-quick-add-btn" onClick={() => onQuickAdd(null, null)}
             aria-label="Browse activity library">Browse activities</button>
         </div>
         {onOpenCoach && (
@@ -28,7 +28,7 @@ export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
     <section className="wk-quick-add" aria-label="Add activity">
       <div className="wk-quick-add-label">
         <span>Add activity</span>
-        <button className="wk-quick-add-btn" style={{ marginLeft: 0 }}
+        <button type="button" className="wk-quick-add-btn" style={{ marginLeft: 0 }}
           onClick={() => onQuickAdd(null, null)} aria-label="Browse activity library">Browse</button>
       </div>
       <div className="wk-quick-chip-row">

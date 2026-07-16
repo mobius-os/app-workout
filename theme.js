@@ -23,7 +23,7 @@ export const CSS = `
 .wk-scroll {
   flex: 1; min-height: 0;
   overflow-y: auto; overflow-x: hidden;
-  padding: 16px;
+  padding: 16px 16px max(16px, env(safe-area-inset-bottom));
   word-break: break-word; overflow-wrap: anywhere;
   overscroll-behavior: contain;
 }
@@ -325,7 +325,7 @@ export const CSS = `
 .wk-rest-value { font-size: 18px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .wk-rest-actions { display: flex; gap: 4px; }
 .wk-rest-actions button {
-  min-width: 44px; min-height: 36px; padding: 6px 9px; border: 0; border-radius: 8px;
+  min-width: 44px; min-height: 44px; padding: 6px 9px; border: 0; border-radius: 8px;
   background: var(--surface); color: var(--accent);
   font-family: var(--font); font-size: 12px; font-weight: 800; cursor: pointer;
 }
@@ -814,7 +814,7 @@ button.wk-pill { cursor: pointer; }
 }
 
 @media (min-width: 840px) {
-  .wk-scroll { padding: 18px 22px 22px; }
+  .wk-scroll { padding: 18px 22px max(22px, env(safe-area-inset-bottom)); }
   .wk-session-layout:not(.is-empty) {
     grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
     gap: 18px;
