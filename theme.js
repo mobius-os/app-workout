@@ -65,7 +65,7 @@ export const CSS = `
 .wk-brand-fallback {
   width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
   align-items: center; justify-content: center;
-  background: var(--accent); color: var(--accent-fg);
+  background: var(--accent-hover, var(--accent)); color: var(--accent-fg);
   font-weight: 700; line-height: 1;
 }
 .wk-subtitle { margin: 0; font-size: 12px; color: var(--muted); user-select: none; }
@@ -203,7 +203,7 @@ export const CSS = `
 /* mobius-ui:Button v1 — keep in sync; library candidate. Diverge below the marker only. */
 .wk-btn-primary {
   width: 100%; min-height: 48px; padding: 14px 16px; border-radius: 12px;
-  border: none; background: var(--accent); color: var(--accent-fg);
+  border: none; background: var(--accent-hover, var(--accent)); color: var(--accent-fg);
   font-family: var(--font); font-size: 15px; font-weight: 600; cursor: pointer;
   touch-action: manipulation; user-select: none;
 }
@@ -334,7 +334,7 @@ export const CSS = `
 .wk-current-session-missing { margin: 0; padding: 0 12px 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .wk-finish-btn {
   min-height: 44px; padding: 10px 14px; border-radius: 8px;
-  border: none; background: var(--accent); color: var(--accent-fg);
+  border: none; background: var(--accent-hover, var(--accent)); color: var(--accent-fg);
   font-family: var(--font); font-size: 13px; font-weight: 800;
   white-space: nowrap; cursor: pointer;
   touch-action: manipulation; user-select: none;
@@ -409,7 +409,7 @@ export const CSS = `
   border: 1px solid var(--border); background: var(--surface); color: var(--accent);
   font-family: var(--font); font-size: 16px; font-weight: 900; cursor: pointer;
 }
-.wk-set-check[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-fg); }
+.wk-set-check[aria-pressed="true"] { border-color: var(--accent-hover, var(--accent)); background: var(--accent-hover, var(--accent)); color: var(--accent-fg); }
 .wk-set-previous {
   display: flex; justify-content: space-between; gap: 8px;
   margin: 4px 28px 0 62px; color: var(--muted);
@@ -805,7 +805,7 @@ button.wk-pill { cursor: pointer; }
   min-height: 44px; padding: 7px 13px; border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
   background: color-mix(in srgb, var(--accent) 9%, transparent);
-  color: var(--accent); font-family: var(--font); font-size: 13px; font-weight: 700;
+  color: var(--text); font-family: var(--font); font-size: 13px; font-weight: 700;
   cursor: pointer; touch-action: manipulation; user-select: none;
   white-space: nowrap;
 }
