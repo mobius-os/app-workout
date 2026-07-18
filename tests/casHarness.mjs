@@ -18,16 +18,19 @@ import { pathToFileURL } from 'node:url'
 // Resolve the platform runtime (createUseDocument / DurableWriteError). It is NOT
 // an npm package — it ships in the Möbius repo — so discover it portably instead
 // of hard-pinning one host path: MOBIUS_RUNTIME (a path or file: URL) wins, then
-// the known checkout locations as a FALLBACK. A fresh clone runs the CAS gate by
-// pointing MOBIUS_RUNTIME at its mobius-runtime.js.
+// MOBIUS_FRONTEND_NODE_MODULES (the sibling harnesses' env; the runtime sits at
+// frontend/public/mobius-runtime.js next to frontend/node_modules), then a
+// `.mobius` checkout beside the repo root — the layout this app's CI creates.
+// So a fresh clone runs the CAS gate with no host-specific path anywhere.
 function runtimeCandidates() {
   const out = []
   const env = process.env.MOBIUS_RUNTIME
   if (env) out.push(/^[a-z][a-z0-9+.-]*:\/\//i.test(env) ? env : pathToFileURL(env).href)
-  out.push(
-    'file:///home/hmzmrzx/projects/mobius/frontend/public/mobius-runtime.js',
-    'file:///home/hmzmrzx/projects/mobius/.claude/worktrees/data-layer/frontend/public/mobius-runtime.js',
-  )
+  const nodeModules = process.env.MOBIUS_FRONTEND_NODE_MODULES
+  if (nodeModules) {
+    out.push(pathToFileURL(`${nodeModules}/../public/mobius-runtime.js`).href)
+  }
+  out.push(new URL('../.mobius/frontend/public/mobius-runtime.js', import.meta.url).href)
   return out
 }
 async function importRuntime() {

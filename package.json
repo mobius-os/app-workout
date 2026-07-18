@@ -1,6 +1,6 @@
 {
   "name": "app-workout",
-  "version": "2.8.3",
+  "version": "2.8.4",
   "private": true,
   "type": "module",
   "description": "Dev/test harness only — Mobius installs index.jsx plus the source_files module tree (see mobius.json). This package.json exists so the .js/.jsx modules are ESM-resolved for node --test.",
