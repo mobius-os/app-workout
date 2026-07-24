@@ -222,12 +222,6 @@ export default function App({ appId, token }) {
     requestAnimationFrame(() => tabRefs.current[nextIndex]?.focus())
   }, [selectTab])
 
-  const quickActions = useMemo(() => [
-    { label: 'Repeat my last workout', prompt: 'Copy my most recent logged session exactly into today’s editable draft. Reset set completion, do not progress loads, and do not commit it.' },
-    { label: 'Build today’s workout', prompt: 'Build an editable workout for today using only my stated goals, time, equipment, and logged history. Ask one question if a key constraint is missing; never invent loads.' },
-    { label: 'Adapt this workout', prompt: 'Adapt my current editable workout to the constraint I give you. Preserve unaffected work, keep it concise, and do not commit it.' },
-  ], [])
-
   const [editingEntry, setEditingEntry] = useState(null)
   // quickAddDraft: { category, activity, metrics } pre-filled from the last
   // logged instance of that exercise. null when not open. lastEntryForQuickAdd
@@ -858,7 +852,7 @@ export default function App({ appId, token }) {
     return <div className="wk-root"><style>{CSS}</style><div className="wk-loading">Loading…</div></div>
   }
 
-  const subtitle = tab === 'session' ? (currentSession ? 'Session in progress.' : 'Ready to train.')
+  const subtitle = tab === 'session' ? (stampedSession?.entries?.length ? 'Session in progress.' : 'Ready to train.')
     : tab === 'insights' ? 'See the shape of it.'
     : 'Everything you\'ve logged.'
 
@@ -872,11 +866,10 @@ export default function App({ appId, token }) {
     <div className="wk-root">
       <style>{CSS}</style>
       <div className="wk-header">
-        <h1 className="wk-sr-only">Workout</h1>
         <div className="wk-brand">
-          {/* Brand mark: the app's real glossy icon (downscaled + cached),
-              no name text. Falls back to an accent dot when this install
-              has no custom icon and the route 404s. */}
+          {/* Brand mark: the app's real glossy icon (downscaled + cached)
+              beside the shared app-name + status treatment. Falls back to an
+              accent tile when this install has no custom icon. */}
           <img
             src={`/api/apps/${appId}/icon?size=64`}
             alt=""
@@ -890,7 +883,10 @@ export default function App({ appId, token }) {
             }}
           />
           <span className="wk-brand-fallback" style={{ display: 'none' }} aria-hidden="true">·</span>
-          <p className="wk-subtitle">{subtitle}</p>
+          <div className="wk-brand-text">
+            <h1 className="wk-brand-name">Workout</h1>
+            <p className="wk-subtitle">{subtitle}</p>
+          </div>
         </div>
         <div className="wk-header-actions">
           <SyncPill status={syncStatus} onRetry={retryFailedSave} />
@@ -903,7 +899,7 @@ export default function App({ appId, token }) {
               title={chatOpen ? 'Close chat' : 'Open chat'}
               onClick={toggleChat}
             >
-              <ChatBubbleIcon size={18} />
+              <ChatBubbleIcon size={22} />
             </button>
           )}
         </div>
@@ -1027,7 +1023,7 @@ export default function App({ appId, token }) {
                         <QuickAddStrip
                           entries={entries}
                           onQuickAdd={openQuickAdd}
-                          onOpenCoach={chatOpen ? null : toggleChat}
+                          hasActiveEntries={Boolean(stampedSession?.entries?.length)}
                         />
                       </div>
                     </div>
@@ -1047,6 +1043,15 @@ export default function App({ appId, token }) {
             )}
           </div>
         </div>
+
+        {tab === 'session' && !editingEntry && !quickAddDraft && !chatOnSessionTab && (
+          <div className="wk-mobile-action-dock">
+            <button type="button" onClick={() => openQuickAdd(null, null)}>
+              <span aria-hidden>+</span>
+              Add activity
+            </button>
+          </div>
+        )}
 
         {chatOnSessionTab && (
           <>
@@ -1068,7 +1073,6 @@ export default function App({ appId, token }) {
               appId={appId}
               token={token}
               store={store}
-              quickActions={quickActions}
               onEntriesMaybeChanged={() => {
                 loadEntries({ allowMigration: false })
                 loadCurrentSession()

@@ -1,6 +1,7 @@
 import React from 'react'
 import { CATEGORIES, sportIconColor, summarizeMetrics } from '../logic.js'
 import { SportIcon } from './SportIcon.jsx'
+import { EditIcon, TrashIcon } from './Icons.jsx'
 
 export function EntryCard({ entry, onDelete, onEdit }) {
   const cat = CATEGORIES[entry.category] || CATEGORIES.other
@@ -25,13 +26,13 @@ export function EntryCard({ entry, onDelete, onEdit }) {
           onClick={() => onEdit(entry)}
           aria-label={`Edit ${entry.activity}`}
           title="Edit"
-        >✎</button>
+        ><EditIcon /></button>
         <button
           className="wk-icon-btn"
           onClick={() => onDelete(entry.id)}
           aria-label={`Delete ${entry.activity}`}
           title="Delete"
-        >×</button>
+        ><TrashIcon /></button>
       </div>
     </div>
   )

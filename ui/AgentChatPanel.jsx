@@ -6,13 +6,11 @@ import { workoutAgentPrompt } from '../agent-prompt.js'
 // flex column (flex:1 + min-height:0 in the theme), the embed fills it, and the
 // iframe fills the embed — so the chat's composer is pinned to the pane's bottom
 // and the panel is never clipped. No `height` prop: the parent owns the sizing.
-export function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, quickActions }) {
+export function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged }) {
   const mountRef = useRef(null)
   const [error, setError] = useState(null)
   const onEntriesRef = useRef(onEntriesMaybeChanged)
   useEffect(() => { onEntriesRef.current = onEntriesMaybeChanged }, [onEntriesMaybeChanged])
-  const quickActionsRef = useRef(quickActions)
-  useEffect(() => { quickActionsRef.current = quickActions }, [quickActions])
   const systemPrompt = useMemo(() => workoutAgentPrompt(appId), [appId])
 
   useEffect(() => {
@@ -31,7 +29,6 @@ export function AgentChatPanel({ appId, token, store, onEntriesMaybeChanged, qui
       title: 'Workout',
       systemPrompt,
       picker: true,
-      quickActions: quickActionsRef.current,
       onTurnDone: () => { onEntriesRef.current?.() },
       onError: ({ error: chatError }) => {
         setError(typeof chatError === 'string' ? chatError : 'Embedded chat reported an error.')

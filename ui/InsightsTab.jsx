@@ -17,6 +17,17 @@ export function InsightsTab({ entries }) {
   const prs = useMemo(() => strengthPRs(entries), [entries])
   const cardio = useMemo(() => cardioBests(entries), [entries])
   const streak = useMemo(() => currentStreak(entries), [entries])
+  const trainingSummary = useMemo(() => {
+    const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000)
+    const recent = entries.filter((entry) => entry.ts >= cutoff)
+    const sessions = new Set(recent.map((entry) => entry.sessionId || entry.localDate || String(entry.ts)))
+    const activities = new Set(entries.map((entry) => entry.activity?.trim()).filter(Boolean))
+    const latestTs = Math.max(0, ...entries.map((entry) => Number(entry.ts) || 0))
+    const latest = latestTs
+      ? new Date(latestTs).toLocaleDateString([], { month: 'short', day: 'numeric' })
+      : '—'
+    return { recentSessions: sessions.size, activities: activities.size, latest }
+  }, [entries])
   const [selected, setSelected] = useState(null) // { category, activity }
   const detailNavHandleRef = useRef(null)
   const detail = useMemo(
@@ -67,25 +78,43 @@ export function InsightsTab({ entries }) {
 
   return (
     <div className="wk-insights-grid">
-      <div className="wk-chart-card">
-        <h2 className="wk-chart-title">Streak</h2>
-        <p className="wk-chart-sub">Consecutive days with at least one logged activity.</p>
-        <div className="wk-streak-value">
-          {streak} <span className="wk-streak-unit">day{streak === 1 ? '' : 's'}</span>
+      <div className="wk-progress-card">
+        <div className="wk-progress-head">
+          <div>
+            <span className="wk-section-kicker">Your training</span>
+            <h2>Progress at a glance</h2>
+            <p>Consistency, variety, and your most recent activity.</p>
+          </div>
+          <span className="wk-progress-badge">{streak > 0 ? `${streak} day streak` : 'Ready for today'}</span>
+        </div>
+        <div className="wk-progress-stats">
+          <div>
+            <strong>{trainingSummary.recentSessions}</strong>
+            <span>sessions in 30 days</span>
+          </div>
+          <div>
+            <strong>{trainingSummary.activities}</strong>
+            <span>activities trained</span>
+          </div>
+          <div>
+            <strong>{trainingSummary.latest}</strong>
+            <span>last workout</span>
+          </div>
         </div>
         <Heatmap entries={entries} />
+        <p className="wk-heatmap-caption">Active days over the last 26 weeks</p>
       </div>
 
       {prs.length > 0 && (
         <div className="wk-chart-card">
           <h2 className="wk-chart-title">Strength PRs</h2>
-          <p className="wk-chart-sub">Best estimated 1RM per lift.</p>
+          <p className="wk-chart-sub">Estimated one-rep max from your best set.</p>
           <table className="wk-pr-table">
             <thead>
               <tr>
                 <th className="wk-pr-th">Lift</th>
                 <th className="wk-pr-th is-right">Top set</th>
-                <th className="wk-pr-th is-right">e1RM</th>
+                <th className="wk-pr-th is-right">Est. 1RM</th>
               </tr>
             </thead>
             <tbody>
@@ -171,8 +200,8 @@ export function InsightsTab({ entries }) {
       )}
 
       <div className="wk-chart-card">
-        <h2 className="wk-chart-title">Weekly volume</h2>
-        <p className="wk-chart-sub">Strength = kg-reps, cardio = km, other = min — last 6 weeks.</p>
+        <h2 className="wk-chart-title">Six-week volume mix</h2>
+        <p className="wk-chart-sub">Strength in kg-reps, cardio in km, and other activities in minutes.</p>
         <CategoryVolumeBars weeks={weeks} />
       </div>
 

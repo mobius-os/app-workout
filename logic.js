@@ -1705,7 +1705,7 @@ function signedPercent(current, previous) {
 // Actionable, exercise-level recap for the just-finished session. Hevy's
 // strongest post-workout pattern is not the vanity "total weight moved" number;
 // it is showing what changed for each exercise. This helper keeps that value in
-// Mobius while staying category-agnostic and deterministic (the coach can add a
+// Mobius while staying category-agnostic and deterministic (chat logging can add a
 // richer interpretation in chat, but the saved state never waits on a model).
 export function buildSessionRecap(history, committed) {
   const before = Array.isArray(history) ? history : []
