@@ -51,13 +51,14 @@ export const CSS = `
 /* /mobius-ui:Focus */
 
 /* Web cap so desktop gets a proper working canvas while mobile stays direct. */
-.wk-inner { width: 100%; max-width: 1040px; margin-left: auto; margin-right: auto; }
+.wk-inner { width: 100%; max-width: 1120px; margin-left: auto; margin-right: auto; }
 
 /* mobius-ui:Header v1 — keep in sync; library candidate. Diverge below the marker only. */
 .wk-header {
   flex: 0 0 auto;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: max(12px, env(safe-area-inset-top)) 16px 10px;
+  min-height: 58px;
+  padding: max(10px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .wk-brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
@@ -68,11 +69,27 @@ export const CSS = `
   background: var(--accent-hover, var(--accent)); color: var(--accent-fg);
   font-weight: 700; line-height: 1;
 }
-.wk-subtitle { margin: 0; font-size: 12px; color: var(--muted); user-select: none; }
+.wk-brand-text {
+  display: flex; flex-direction: column; justify-content: center;
+  min-width: 0; line-height: 1.2;
+}
+.wk-brand-name {
+  margin: 0; color: var(--text); font-size: 15px; font-weight: 750;
+  letter-spacing: -0.01em;
+}
+.wk-subtitle {
+  margin: 1px 0 0; max-width: min(56vw, 420px);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; color: var(--muted); user-select: none;
+}
 .wk-header-actions { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
 /* Base border so the pressed-state border-color below is visible (the shared
    .wk-icon-btn is borderless). */
-.wk-chat-toggle { width: 44px; height: 44px; border: 1px solid transparent; }
+.wk-chat-toggle {
+  width: 44px; height: 44px;
+  border: 1px solid var(--border);
+  background: var(--bg); color: var(--text);
+}
 .wk-chat-toggle[aria-pressed="true"] {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface));
   color: var(--accent);
@@ -83,7 +100,7 @@ export const CSS = `
 /* mobius-ui:Segmented v1 — keep in sync; library candidate. Diverge below the marker only. */
 .wk-tabbar {
   flex: 0 0 auto;
-  display: flex; gap: 4px; padding: 8px 12px;
+  display: flex; gap: 6px; padding: 8px 12px;
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .wk-tab-btn {
@@ -95,8 +112,9 @@ export const CSS = `
   touch-action: manipulation; user-select: none;
 }
 .wk-tab-btn.is-active {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
   color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
 }
 @media (prefers-reduced-motion: no-preference) {
   .wk-tab-btn:active { opacity: 0.75; }
@@ -242,13 +260,13 @@ export const CSS = `
    rows: the icon names the sport, the meta line carries the key numbers. */
 .wk-entry-card {
   display: flex; align-items: center; gap: 10px;
-  padding: 10px; margin-bottom: 8px;
-  background: color-mix(in srgb, var(--surface) 96%, var(--bg));
-  border: 1px solid var(--border); border-radius: 10px;
+  padding: 11px 12px; margin-bottom: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px;
 }
 .wk-entry-card.is-draft { background: color-mix(in srgb, var(--bg) 62%, var(--surface)); }
 .wk-entry-icon {
-  width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px;
+  width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px;
   display: flex; align-items: center; justify-content: center; font-size: 18px;
 }
 .wk-entry-body { flex: 1; min-width: 0; }
@@ -259,7 +277,7 @@ export const CSS = `
 .wk-entry-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .wk-icon-btn {
   position: relative;
-  width: 32px; height: 32px; border-radius: 8px;
+  width: 36px; height: 36px; border-radius: 8px;
   display: inline-flex; align-items: center; justify-content: center; line-height: 1;
   border: none; background: transparent; color: var(--muted);
   font-family: var(--font); font-size: 14px; font-weight: 800; cursor: pointer;
@@ -287,20 +305,24 @@ export const CSS = `
    read as the one live thing on the screen. */
 .wk-current-session {
   margin-bottom: 14px; overflow: hidden;
-  border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+  box-shadow: 0 10px 30px color-mix(in srgb, #000 10%, transparent);
 }
 .wk-current-session.is-live {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--accent) 10%, var(--surface)),
+    var(--surface) 48%
+  );
 }
 .wk-current-session-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 14px; border-bottom: 1px solid var(--border);
+  padding: 16px; border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
 }
-.wk-current-session-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .wk-current-session-title {
   margin: 0; display: flex; align-items: center;
-  font-size: 14px; line-height: 1.25; font-weight: 800; letter-spacing: 0; user-select: none;
+  font-size: 16px; line-height: 1.25; font-weight: 800; letter-spacing: -0.01em; user-select: none;
 }
 .wk-live-dot {
   width: 8px; height: 8px; flex-shrink: 0; border-radius: 999px;
@@ -313,7 +335,7 @@ export const CSS = `
 @media (prefers-reduced-motion: no-preference) {
   .wk-live-dot { animation: wk-live-pulse 2.2s ease-in-out infinite; }
 }
-.wk-current-session-sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; user-select: none; }
+.wk-current-session-sub { margin: 4px 0 0; color: var(--muted); font-size: 12px; user-select: none; }
 .wk-rest-timer {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin: 10px 12px 0; padding: 9px 10px;
@@ -330,12 +352,42 @@ export const CSS = `
   font-family: var(--font); font-size: 12px; font-weight: 800; cursor: pointer;
 }
 .wk-current-session-list { padding: 10px 12px 4px; }
-.wk-current-session-empty { padding: 18px 14px; color: var(--muted); font-size: 13px; }
-.wk-current-session-missing { margin: 0; padding: 0 12px 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.wk-current-session-empty {
+  display: flex; align-items: center; gap: 12px;
+  padding: 20px 16px; color: var(--muted);
+}
+.wk-current-session-empty-mark {
+  width: 42px; height: 42px; flex: 0 0 42px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+.wk-current-session-empty > span:last-child {
+  min-width: 0; display: flex; flex-direction: column; gap: 3px;
+}
+.wk-current-session-empty strong { color: var(--text); font-size: 13px; }
+.wk-current-session-empty small { font-size: 12px; line-height: 1.45; }
+.wk-clear-session { flex: 0 0 auto; }
+.wk-current-session-footer {
+  position: sticky; bottom: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 12px 14px max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(12px);
+}
+.wk-current-session-status {
+  min-width: 0; display: flex; flex-direction: column; gap: 2px;
+}
+.wk-current-session-status strong { font-size: 12px; }
+.wk-current-session-status span {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted); font-size: 11px;
+}
 .wk-finish-btn {
-  min-height: 44px; padding: 10px 14px; border-radius: 8px;
+  min-width: 150px; min-height: 48px; padding: 11px 16px; border-radius: 10px;
   border: none; background: var(--accent-hover, var(--accent)); color: var(--accent-fg);
-  font-family: var(--font); font-size: 13px; font-weight: 800;
+  font-family: var(--font); font-size: 14px; font-weight: 800;
   white-space: nowrap; cursor: pointer;
   touch-action: manipulation; user-select: none;
 }
@@ -450,14 +502,15 @@ export const CSS = `
 .wk-activity-search { font-size: 15px; }
 .wk-activity-group-row {
   display: flex; gap: 6px; overflow-x: auto;
-  margin: 10px -2px 8px; padding: 0 2px 2px;
+  margin: 10px -2px 8px; padding: 0 12px 4px 2px;
+  scroll-snap-type: x proximity;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .wk-activity-group-row::-webkit-scrollbar { display: none; }
 .wk-activity-group {
   flex: 0 0 auto;
-  min-height: 34px; padding: 7px 10px; border-radius: 999px;
+  min-height: 44px; padding: 8px 11px; border-radius: 999px;
   border: 1px solid transparent;
   background: transparent; color: var(--muted);
   font-family: var(--font); font-size: 12px; font-weight: 800;
@@ -552,15 +605,53 @@ export const CSS = `
 
 /* Chart / insight cards — app-specific. */
 .wk-chart-card {
-  background: color-mix(in srgb, var(--surface) 94%, #000); border: 1px solid var(--border);
-  border-radius: 8px; padding: 14px; margin-bottom: 14px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px; margin-bottom: 14px;
 }
 .wk-chart-card.is-nested { margin-top: 14px; }
 .wk-chart-card.is-last { margin-top: 14px; margin-bottom: 0; }
 .wk-chart-title { margin: 0 0 2px; font-size: 14px; font-weight: 700; user-select: none; }
-.wk-chart-sub { margin: 0 0 10px; font-size: 12px; color: var(--muted); user-select: none; }
+.wk-chart-sub { margin: 3px 0 12px; font-size: 12px; line-height: 1.45; color: var(--muted); user-select: none; }
 .wk-streak-value { font-size: 34px; font-weight: 800; color: var(--accent); }
 .wk-streak-unit { font-size: 15px; font-weight: 600; color: var(--muted); }
+
+.wk-progress-card {
+  margin-bottom: 14px; padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 90% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 44%),
+    var(--surface);
+}
+.wk-progress-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  margin-bottom: 16px;
+}
+.wk-progress-head h2 { margin: 2px 0 3px; font-size: 18px; letter-spacing: -0.02em; }
+.wk-progress-head p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.wk-section-kicker {
+  display: block; color: var(--accent); font-size: 11px; font-weight: 800;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.wk-progress-badge {
+  flex: 0 0 auto; padding: 6px 9px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text); font-size: 11px; font-weight: 800; white-space: nowrap;
+}
+.wk-progress-stats {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px; margin-bottom: 14px;
+}
+.wk-progress-stats > div {
+  min-width: 0; padding: 11px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+}
+.wk-progress-stats strong {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.wk-progress-stats span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.wk-heatmap-caption { margin: 7px 0 0; color: var(--muted); font-size: 11px; }
 
 .wk-pr-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
 .wk-pr-th {
@@ -579,8 +670,8 @@ export const CSS = `
 
 /* mobius-ui:Empty v1 — keep in sync; library candidate. Diverge below the marker only. */
 .wk-empty {
-  padding: 48px 16px; text-align: center; color: var(--muted);
-  font-size: 13px; line-height: 1.6;
+  max-width: 440px; margin: auto; padding: 48px 24px; text-align: center; color: var(--muted);
+  font-size: 14px; line-height: 1.6;
 }
 .wk-empty.is-inline { padding: 18px 8px; }
 .wk-empty-icon {
@@ -643,8 +734,8 @@ button.wk-pill { cursor: pointer; }
 /* Category stat tiles — app-specific. */
 .wk-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(138px, 1fr)); gap: 10px; }
 .wk-stat-tile {
-  padding: 12px; border: 1px solid var(--border); border-radius: 12px;
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  padding: 12px; border: 0; border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
 }
 .wk-stat-head { display: flex; align-items: center; gap: 8px; }
 .wk-stat-value { margin: 7px 0 2px; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -729,7 +820,7 @@ button.wk-pill { cursor: pointer; }
   align-items: start;
 }
 .wk-session-layout.is-empty {
-  max-width: 720px;
+  max-width: 760px;
   margin-left: auto;
   margin-right: auto;
 }
@@ -759,34 +850,35 @@ button.wk-pill { cursor: pointer; }
 .wk-recap-row.is-pr .wk-recap-copy small,
 .wk-recap-row.is-up .wk-recap-copy small { color: var(--text); }
 
-.wk-coach-cta {
-  width: 100%; min-height: 52px; margin-top: 10px; padding: 8px 10px;
-  display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 9px;
-  border: 0; border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--text);
-  text-align: left; font-family: var(--font); cursor: pointer;
-}
-.wk-coach-cta-icon {
-  width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 8px; background: var(--surface); color: var(--accent);
-}
-.wk-coach-cta > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.wk-coach-cta strong { font-size: 13px; }
-.wk-coach-cta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
-
 /* Quick-add strip — recent exercise chips on the Log tab so a repeat set is one tap. */
 .wk-quick-add {
   margin-bottom: 14px;
-  padding: 14px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
 }
 .wk-quick-add.is-empty { text-align: center; }
+.wk-quick-add-empty-mark {
+  width: 52px; height: 52px; margin: 2px auto 12px; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+.wk-quick-add-title { margin: 0; font-size: 17px; letter-spacing: -0.015em; }
+.wk-quick-add-copy {
+  max-width: 420px; margin: 6px auto 14px; color: var(--muted);
+  font-size: 13px; line-height: 1.5;
+}
 .wk-quick-add-label {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin-bottom: 10px; font-size: 13px; font-weight: 800; color: var(--text);
+  margin-bottom: 10px; font-size: 13px; color: var(--text);
   user-select: none;
 }
 .wk-quick-add.is-empty .wk-quick-add-label { justify-content: center; }
+.wk-quick-add-label > span {
+  min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+}
+.wk-quick-add-label strong { font-size: 14px; }
+.wk-quick-add-label small { color: var(--muted); font-size: 11px; font-weight: 600; }
 .wk-quick-chip {
   display: inline-flex; align-items: center; gap: 6px;
   min-height: 44px; padding: 7px 11px; border-radius: 10px;
@@ -809,6 +901,34 @@ button.wk-pill { cursor: pointer; }
   cursor: pointer; touch-action: manipulation; user-select: none;
   white-space: nowrap;
 }
+.wk-add-activity-primary {
+  width: 100%; min-height: 48px; margin-top: 12px; padding: 11px 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  border: 1px solid var(--accent-hover, var(--accent)); border-radius: 10px;
+  background: var(--accent-hover, var(--accent)); color: var(--accent-fg);
+  font-family: var(--font); font-size: 14px; font-weight: 800;
+  cursor: pointer; touch-action: manipulation;
+}
+.wk-add-activity-primary span { font-size: 18px; line-height: 1; }
+.wk-quick-add.is-empty .wk-quick-chip-row { justify-content: center; }
+.wk-quick-add.is-empty .wk-add-activity-primary {
+  min-width: min(100%, 240px);
+  margin-top: 0;
+}
+
+.wk-mobile-action-dock { display: none; }
+
+.wk-history-summary {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+  margin: 2px 0 18px;
+}
+.wk-history-summary h2 { margin: 3px 0 0; font-size: 20px; letter-spacing: -0.025em; }
+.wk-history-count {
+  display: flex; align-items: baseline; gap: 5px; color: var(--muted);
+  font-size: 11px; white-space: nowrap;
+}
+.wk-history-count strong { color: var(--text); font-size: 16px; font-variant-numeric: tabular-nums; }
+.wk-history-count i { width: 1px; height: 16px; margin: 0 5px; background: var(--border); }
 @media (prefers-reduced-motion: no-preference) {
   .wk-quick-add-btn:active { opacity: 0.75; }
 }
@@ -827,7 +947,8 @@ button.wk-pill { cursor: pointer; }
     flex-direction: column;
   }
   .wk-session-side .wk-quick-chip,
-  .wk-session-side .wk-quick-add-btn {
+  .wk-session-side .wk-quick-add-btn,
+  .wk-session-side .wk-add-activity-primary {
     width: 100%;
     justify-content: flex-start;
   }
@@ -844,11 +965,31 @@ button.wk-pill { cursor: pointer; }
     gap: 14px;
   }
   .wk-insights-grid > .wk-chart-card { margin-bottom: 0; min-width: 0; }
+  .wk-insights-grid > .wk-progress-card {
+    grid-column: 1 / -1; margin-bottom: 0;
+    display: grid;
+    grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+    grid-template-areas:
+      "progress-head progress-map"
+      "progress-stats progress-map"
+      ". progress-caption";
+    align-items: start; column-gap: 22px;
+  }
+  .wk-progress-card .wk-progress-head {
+    grid-area: progress-head; flex-direction: column; margin-bottom: 12px;
+  }
+  .wk-progress-card .wk-progress-stats { grid-area: progress-stats; margin-bottom: 0; }
+  .wk-progress-card .wk-heatmap { grid-area: progress-map; align-self: center; margin-top: 0; }
+  .wk-progress-card .wk-heatmap-caption { grid-area: progress-caption; }
 }
 
 @media (max-width: 420px) {
+  .wk-brand-name { font-size: 14px; }
+  .wk-subtitle { max-width: 190px; }
   .wk-current-session-head { align-items: flex-start; }
-  .wk-current-session-actions { flex-direction: column-reverse; align-items: flex-end; gap: 2px; }
+  .wk-current-session-footer { align-items: stretch; flex-direction: column; gap: 9px; }
+  .wk-current-session-status span { white-space: normal; }
+  .wk-current-session-footer .wk-finish-btn { width: 100%; }
   .wk-entry-card.is-draft { padding: 9px; }
   .wk-entry-card.is-draft .wk-entry-time { font-size: 0; }
   .wk-entry-card.is-draft .wk-use-last { margin-left: 4px; font-size: 11px; }
@@ -857,6 +998,10 @@ button.wk-pill { cursor: pointer; }
   .wk-worksheet-row .wk-input { min-height: 44px; padding: 8px 5px; text-align: center; }
   .wk-set-previous { margin-left: 66px; margin-right: 24px; }
   .wk-activity-results { max-height: none; overflow: visible; overscroll-behavior: auto; }
+  .wk-progress-head { flex-direction: column; }
+  .wk-progress-stats { grid-template-columns: 1fr 1fr; }
+  .wk-progress-stats > div:last-child { grid-column: 1 / -1; }
+  .wk-history-summary { align-items: flex-start; flex-direction: column; gap: 10px; }
 }
 
 @media (max-width: 839px) {
@@ -865,6 +1010,24 @@ button.wk-pill { cursor: pointer; }
     background: var(--surface);
     border-bottom: 1px solid var(--border);
   }
+  .wk-session-side .wk-add-activity-primary { display: none; }
+  .wk-mobile-action-dock {
+    flex: 0 0 auto;
+    display: flex;
+    padding: 10px max(16px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 96%, transparent);
+    backdrop-filter: blur(14px);
+  }
+  .wk-mobile-action-dock button {
+    width: 100%; min-height: 48px; border: 0; border-radius: 12px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    background: var(--accent-hover, var(--accent)); color: var(--accent-fg);
+    font: 800 15px/1 var(--font); cursor: pointer; touch-action: manipulation;
+  }
+  .wk-mobile-action-dock button span { font-size: 19px; line-height: 1; }
 }
 
 /* mobius-ui:ReducedMotion v1 -- honor the OS reduce-motion setting */

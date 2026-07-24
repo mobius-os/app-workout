@@ -18,19 +18,19 @@ https://raw.githubusercontent.com/mobius-os/app-workout/main/mobius.json
 
 ## How it works
 
-The **Session** tab is the home surface: a live current-session worksheet, previous-performance context, one-tap set completion with rest feedback, a searchable activity library with recent shortcuts, and an embedded Möbius coach behind the header toggle. Tell the coach to repeat your last workout, build today from recent training, or adjust the open session; there is no separate routine-builder to maintain. The app keeps the result in `current_session.json`, refreshes it after each chat turn, and commits the complete group into `entries.json` only when you press **Finish session**.
+The **Session** tab is the home surface: a live current-session worksheet, previous-performance context, one-tap set completion with rest feedback, a searchable activity library with recent shortcuts, and optional natural-language logging behind the header chat toggle. The app keeps the result in `current_session.json`, refreshes it after each chat turn, and commits the complete group into `entries.json` only when you press **Finish workout**.
 
-Finish requirements are intentionally strict, while the coach may create honest incomplete drafts for the worksheet:
+Finish requirements are intentionally strict, while chat logging may create honest incomplete drafts for the worksheet:
 
 - Strength needs an exercise plus at least one set, and every set needs reps and weight.
 - Cardio/running/cycling/swimming/rowing/hiking needs an activity plus duration or distance.
 - Yoga/sport/other needs an activity plus duration, note, or location.
 
-If the user says `2 sets of deadlifts`, the agent adds two incomplete editable sets and asks once for reps and weight. If the user says `2 sets with 20kg`, it still asks which exercise before adding anything. The coach must not invent loads, completed sets, goals, recovery signals, or medical conclusions. Multi-activity messages are split into one session draft.
+If the user says `2 sets of deadlifts`, chat logging adds two incomplete editable sets and asks once for reps and weight. If the user says `2 sets with 20kg`, it still asks which exercise before adding anything. It must not invent loads or completed sets. Multi-activity messages are split into one session draft.
 
 Three top tabs:
 
-- **Session** — the live current-session draft. Strength rows show the matching set from last time, can reuse the previous exercise in one tap, mark sets complete, and start a 90-second rest timer. Once any set is checked, only checked strength work is committed, so skipped planned sets never become History or PRs. The side rail combines three recent shortcuts with **Repeat my last workout**, **Build today’s workout**, and **Adapt this workout**. On wider screens the current session and activity rail sit side by side; on mobile they stack.
+- **Session** — the live current-session draft. Strength rows show the matching set from last time, can reuse the previous exercise in one tap, mark sets complete, and start a 90-second rest timer. Once any set is checked, only checked strength work is committed, so skipped planned sets never become History or PRs. The side rail keeps recent activities and the full activity library close; on mobile a bottom action keeps **Add activity** within thumb reach.
 - **History** — a flat, newest-first list of every committed entry, with edit and delete.
 - **Insights** — analytics *by category and exercise*: weekly volume over the last 6 weeks (strength = kg·reps, cardio = km, other = minutes), category stats, strength PRs ranked by estimated 1-rep max (Epley), cardio bests, and a 26-week streak heatmap. **Tap any exercise** (in the Exercises, Strength PRs, or Cardio bests tables) to open its drill-down: lifetime records (heaviest, est. 1RM, best set/session volume, most reps — or longest distance/time and best pace for cardio), a per-session trend sparkline (estimated-1RM for lifts, distance/pace for cardio), set-records (best weight at each rep count), and full session history. The trend is hand-drawn SVG, so the drill-down works offline like the rest of Insights.
 

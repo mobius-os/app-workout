@@ -198,6 +198,7 @@ export function renderDoc(store, path, opts) {
       return refSlots[i]
     },
     useCallback(fn) { return fn },
+    useMemo(fn) { return fn() },
     useEffect(fn) { effects.push(fn) },
   }
   const useDocument = createUseDocument(store, React)

@@ -12,10 +12,11 @@ test('exercise detail dialog owns focus, traps Tab, and restores the trigger', (
   assert.match(source, /previousFocus\?\.focus\?\.\(\)/)
 })
 
-test('session validation is consolidated and rest completion is announced', () => {
+test('session validation stays in the finish footer and rest completion is announced', () => {
   const panel = read('ui/CurrentSessionPanel.jsx')
   const card = read('ui/SessionDraftCard.jsx')
-  assert.match(panel, /Complete before finishing:/)
+  assert.match(panel, /Still needed:/)
+  assert.match(panel, /aria-label="Finish workout"/)
   assert.match(panel, /role="timer" aria-live="off"/)
   assert.match(panel, /role="status" aria-live="polite"/)
   assert.doesNotMatch(card, /wk-current-session-missing/)

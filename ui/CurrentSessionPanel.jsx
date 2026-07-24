@@ -4,6 +4,7 @@ import {
   lastEntryForExercise, normalizeCurrentSession,
 } from '../logic.js'
 import { SessionDraftCard } from './SessionDraftCard.jsx'
+import { SportIcon } from './SportIcon.jsx'
 
 function sessionWorkSummary(entries) {
   let sets = 0
@@ -85,37 +86,28 @@ export function CurrentSessionPanel({
       ].filter(Boolean).join(' · ')
     : 'No activities yet'
   return (
-    <section className="wk-current-session is-live" aria-label="Current session">
+    <section className={`wk-current-session${entries.length > 0 ? ' is-live' : ''}`} aria-label="Current session">
       <div className="wk-current-session-head">
         <div style={{ minWidth: 0 }}>
           <h2 className="wk-current-session-title">
-            <span className="wk-live-dot" aria-hidden />Live session
+            {entries.length > 0 && <span className="wk-live-dot" aria-hidden />}
+            {entries.length > 0 ? 'Live workout' : 'Ready to start'}
           </h2>
           <p className="wk-current-session-sub">
             {finishing ? 'Saving session…' : sessionSubtitle}
           </p>
         </div>
-        <div className="wk-current-session-actions">
+        {entries.length > 0 && (
           <button
             type="button"
-            className="wk-btn-ghost is-muted"
+            className="wk-btn-ghost is-muted wk-clear-session"
             onClick={onClear}
             aria-label="Clear current session"
             title="Clear current session"
           >
             Clear
           </button>
-          <button
-            type="button"
-            className="wk-finish-btn"
-            disabled={!ready}
-            onClick={onFinish}
-            aria-label="Finish session"
-            title={ready ? 'Finish session' : 'Finish session once required details are complete'}
-          >
-            Finish session
-          </button>
-        </div>
+        )}
       </div>
       {restTimer && (
         <div className="wk-rest-timer" role="timer" aria-live="off" aria-label={`Rest timer ${restClock(restRemaining)} remaining`}>
@@ -144,10 +136,33 @@ export function CurrentSessionPanel({
           ))}
         </div>
       ) : (
-        <div className="wk-current-session-empty">Choose an activity, or tell the chat what you did.</div>
+        <div className="wk-current-session-empty">
+          <span className="wk-current-session-empty-mark" aria-hidden>
+            <SportIcon name="sparkles" color="var(--accent)" size={20} />
+          </span>
+          <span>
+            <strong>Add your first activity</strong>
+            <small>Choose from your recent activities or browse the full library.</small>
+          </span>
+        </div>
       )}
-      {missing.length > 0 && (
-        <p className="wk-current-session-missing">Complete before finishing: {missing.join(', ')}.</p>
+      {entries.length > 0 && (
+        <div className="wk-current-session-footer">
+          <div className="wk-current-session-status">
+            <strong>{ready ? 'Workout ready' : 'Finish the details'}</strong>
+            <span>{ready ? 'Everything required is filled in.' : `Still needed: ${missing.join(', ')}.`}</span>
+          </div>
+          <button
+            type="button"
+            className="wk-finish-btn"
+            disabled={!ready}
+            onClick={onFinish}
+            aria-label="Finish workout"
+            title={ready ? 'Finish workout' : 'Finish once required details are complete'}
+          >
+            {finishing ? 'Saving…' : 'Finish workout'}
+          </button>
+        </div>
       )}
     </section>
   )

@@ -2,34 +2,30 @@ import React, { useMemo } from 'react'
 import { recentExercises } from '../logic.js'
 import { SportIcon } from './SportIcon.jsx'
 
-export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
+export function QuickAddStrip({ entries, onQuickAdd, hasActiveEntries = false }) {
   const recents = useMemo(() => recentExercises(entries, 3), [entries])
   if (!entries || entries.length === 0) {
     return (
       <section className="wk-quick-add is-empty" aria-label="Add activity">
-        <div className="wk-quick-add-label">
-          <span>Add activity</span>
+        <div className="wk-quick-add-empty-mark" aria-hidden>
+          <SportIcon name="stopwatch" color="var(--accent)" size={24} />
         </div>
+        <h2 className="wk-quick-add-title">Start your workout</h2>
+        <p className="wk-quick-add-copy">Add your first activity. You can adjust every set as you train.</p>
         <div className="wk-quick-chip-row">
-          <button type="button" className="wk-quick-add-btn" onClick={() => onQuickAdd(null, null)}
-            aria-label="Browse activity library">Browse activities</button>
+          <button type="button" className="wk-add-activity-primary" onClick={() => onQuickAdd(null, null)}
+            aria-label="Browse activity library"><span aria-hidden>+</span> Add first activity</button>
         </div>
-        {onOpenCoach && (
-          <button type="button" className="wk-coach-cta" onClick={onOpenCoach}>
-            <span className="wk-coach-cta-icon" aria-hidden><SportIcon name="sparkles" size={18} /></span>
-            <span><strong>Plan with coach</strong><small>Repeat, adapt, or build today’s session</small></span>
-            <span aria-hidden>›</span>
-          </button>
-        )}
       </section>
     )
   }
   return (
     <section className="wk-quick-add" aria-label="Add activity">
       <div className="wk-quick-add-label">
-        <span>Add activity</span>
-        <button type="button" className="wk-quick-add-btn" style={{ marginLeft: 0 }}
-          onClick={() => onQuickAdd(null, null)} aria-label="Browse activity library">Browse</button>
+        <span>
+          <strong>Quick add</strong>
+          <small>Your recent activities</small>
+        </span>
       </div>
       <div className="wk-quick-chip-row">
         {recents.map((ex) => (
@@ -45,13 +41,10 @@ export function QuickAddStrip({ entries, onQuickAdd, onOpenCoach }) {
           </button>
         ))}
       </div>
-      {onOpenCoach && (
-        <button type="button" className="wk-coach-cta" onClick={onOpenCoach}>
-          <span className="wk-coach-cta-icon" aria-hidden><SportIcon name="sparkles" size={18} /></span>
-          <span><strong>Plan with coach</strong><small>Repeat, adapt, or build today’s session</small></span>
-          <span aria-hidden>›</span>
-        </button>
-      )}
+      <button type="button" className="wk-add-activity-primary" onClick={() => onQuickAdd(null, null)}
+        aria-label="Browse activity library">
+        <span aria-hidden>+</span> {hasActiveEntries ? 'Add another activity' : 'Add activity'}
+      </button>
     </section>
   )
 }
