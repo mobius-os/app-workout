@@ -172,7 +172,7 @@ The palette has no app-owned brand hex. Every interactive and structural role in
 - **Scrim** (`rgba(0,0,0,.5)`): Adaptive detail and confirmation backdrop.
 
 ### Named Rules
-**The Token-Only Rule.** Do not introduce app-owned light/dark palettes. Use the shell roles exactly, including `surface2`’s fallback to `surface`.
+**The Token-Only Rule.** Do not introduce app-owned light/dark palettes. Use the shell roles exactly, including `surface-2`’s fallback to `surface`.
 
 **The State-Color Rule.** Accent means action or current progress, green means valid completion, and danger means destructive intent. Color is never decoration.
 
