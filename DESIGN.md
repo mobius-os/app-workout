@@ -4,7 +4,7 @@ description: A Möbius-native training ledger for fast, recoverable set logging.
 colors:
   background: "var(--bg)"
   surface: "var(--surface)"
-  surface-secondary: "var(--surface2, var(--surface))"
+  surface-secondary: "var(--surface-2, var(--surface))"
   text: "var(--text)"
   muted: "var(--muted)"
   border: "var(--border)"
@@ -166,13 +166,13 @@ The palette has no app-owned brand hex. Every interactive and structural role in
 ### Neutral
 - **Background** (`var(--bg)`): Root canvas and focused editor layers.
 - **Surface** (`var(--surface)`): Header, inputs, sheets, toast, and primary neutral containers.
-- **Secondary Surface** (`var(--surface2, var(--surface))`): Secondary buttons, set numbers, incomplete checks, recovery cards, and media placeholders.
+- **Secondary Surface** (`var(--surface-2, var(--surface))`): Secondary buttons, set numbers, incomplete checks, recovery cards, and media placeholders.
 - **Text / Muted / Border** (`var(--text)`, `var(--muted)`, `var(--border)`): Primary copy, supporting metadata, ruled analytics, and one-pixel structure.
 - **Media Canvas** (`#ffffff`): Stable neutral behind the selected exercise animation, independent of shell theme.
 - **Scrim** (`rgba(0,0,0,.5)`): Adaptive detail and confirmation backdrop.
 
 ### Named Rules
-**The Token-Only Rule.** Do not introduce app-owned light/dark palettes. Use the shell roles exactly, including `surface2`’s fallback to `surface`.
+**The Token-Only Rule.** Do not introduce app-owned light/dark palettes. Use the shell roles exactly, including `surface-2`’s fallback to `surface`.
 
 **The State-Color Rule.** Accent means action or current progress, green means valid completion, and danger means destructive intent. Color is never decoration.
 
