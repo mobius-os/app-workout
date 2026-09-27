@@ -4,7 +4,7 @@ description: A Möbius-native training ledger for fast, recoverable set logging.
 colors:
   background: "var(--bg)"
   surface: "var(--surface)"
-  surface-secondary: "var(--surface2, var(--surface))"
+  surface-secondary: "var(--surface-2, var(--surface))"
   text: "var(--text)"
   muted: "var(--muted)"
   border: "var(--border)"
@@ -166,7 +166,7 @@ The palette has no app-owned brand hex. Every interactive and structural role in
 ### Neutral
 - **Background** (`var(--bg)`): Root canvas and focused editor layers.
 - **Surface** (`var(--surface)`): Header, inputs, sheets, toast, and primary neutral containers.
-- **Secondary Surface** (`var(--surface2, var(--surface))`): Secondary buttons, set numbers, incomplete checks, recovery cards, and media placeholders.
+- **Secondary Surface** (`var(--surface-2, var(--surface))`): Secondary buttons, set numbers, incomplete checks, recovery cards, and media placeholders.
 - **Text / Muted / Border** (`var(--text)`, `var(--muted)`, `var(--border)`): Primary copy, supporting metadata, ruled analytics, and one-pixel structure.
 - **Media Canvas** (`#ffffff`): Stable neutral behind the selected exercise animation, independent of shell theme.
 - **Scrim** (`rgba(0,0,0,.5)`): Adaptive detail and confirmation backdrop.
