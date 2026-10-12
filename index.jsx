@@ -14,7 +14,7 @@ import {
 
 const STATE_PATH = 'workout_state.json'
 // Set fields save after a short pause in typing rather than on every
-// keystroke; blur, hiding the app, and any other save flush the pending one.
+// keystroke; hiding the app, unmounting, and any other save flush the pending one.
 const TYPING_SAVE_DELAY_MS = 500
 const EXERCISE_PAGE_SIZE = 60
 
@@ -474,7 +474,7 @@ export default function App({ appId, token }) {
       <div className="wk-page">
         <main className="wk-scroll">
           {active
-            ? <ActiveWorkout active={active} state={state} exercises={exercises} update={updateActive} typeInSet={typeInActive} flushTyping={flushTypingSave} openExercise={openExercise} saveExerciseNote={saveExerciseNote} store={store} token={token} />
+            ? <ActiveWorkout active={active} state={state} exercises={exercises} update={updateActive} typeInSet={typeInActive} openExercise={openExercise} saveExerciseNote={saveExerciseNote} store={store} token={token} />
             : tab === 'workout'
               ? <WorkoutHome state={state} exercises={exercises} start={start} createRoutine={() => setBuilder({ id: crypto.randomUUID(), name: 'New routine', exercises: [] })} editRoutine={(routine) => setBuilder({ ...routine, exercises: routine.exercises.map((item) => ({ ...item })) })} />
               : tab === 'history'
@@ -528,7 +528,7 @@ function WorkoutHome({ state, exercises, start, createRoutine, editRoutine }) {
   </>
 }
 
-function ActiveWorkout({ active, state, exercises, update, typeInSet, flushTyping, openExercise, saveExerciseNote, store, token }) {
+function ActiveWorkout({ active, state, exercises, update, typeInSet, openExercise, saveExerciseNote, store, token }) {
   const [picker, setPicker] = useState(null)
   const [menuIndex, setMenuIndex] = useState(null)
   const [query, setQuery] = useState('')
@@ -586,7 +586,7 @@ function ActiveWorkout({ active, state, exercises, update, typeInSet, flushTypin
             if (!prior) return
             update((current) => ({ ...current, exercises: current.exercises.map((candidate, index) => index === exerciseIndex ? { ...candidate, sets: candidate.sets.map((row) => row.id === set.id ? { ...row, weight: String(prior.weight ?? ''), reps: String(prior.reps ?? ''), completed: false } : row) } : candidate) }))
           }}>{previous[setIndex] ? `${previous[setIndex].weight || '—'} × ${previous[setIndex].reps || '—'}` : '—'}</button>
-          {['weight', 'reps'].map((field) => <input key={field} className="wk-input wk-set-input" inputMode="decimal" aria-label={`${field} set ${setIndex + 1} for ${exercise.name}`} value={set[field]} onBlur={flushTyping} onChange={(event) => typeInSet((current) => ({ ...current, exercises: current.exercises.map((candidate, index) => index === exerciseIndex ? { ...candidate, sets: candidate.sets.map((row) => row.id === set.id ? { ...row, [field]: event.target.value, completed: field === 'reps' && Number(event.target.value) <= 0 ? false : row.completed } : row) } : candidate) }))} />)}
+          {['weight', 'reps'].map((field) => <input key={field} className="wk-input wk-set-input" inputMode="decimal" aria-label={`${field} set ${setIndex + 1} for ${exercise.name}`} value={set[field]} onChange={(event) => typeInSet((current) => ({ ...current, exercises: current.exercises.map((candidate, index) => index === exerciseIndex ? { ...candidate, sets: candidate.sets.map((row) => row.id === set.id ? { ...row, [field]: event.target.value, completed: field === 'reps' && Number(event.target.value) <= 0 ? false : row.completed } : row) } : candidate) }))} />)}
           <button className={`wk-check${set.completed ? ' is-complete' : ''}${personalRecord ? ' is-record' : ''}`} disabled={!set.completed && Number(set.reps) <= 0} title={!set.completed && Number(set.reps) <= 0 ? 'Enter reps before marking this set done' : undefined} aria-label={!set.completed && Number(set.reps) <= 0 ? `Enter reps before marking set ${setIndex + 1} complete` : `${set.completed ? 'Unmark' : 'Mark'} set ${setIndex + 1} complete${personalRecord ? ', new personal record' : ''}`} onClick={() => update((current) => ({ ...current, restTimer: !set.completed && Number(set.reps) > 0 ? { exerciseId: exercise.id, exerciseName: exercise.name, endsAt: Date.now() + ((item.restSeconds || 90) * 1000), completed: false } : current.restTimer, exercises: current.exercises.map((candidate, index) => index === exerciseIndex ? { ...candidate, sets: candidate.sets.map((row) => row.id === set.id ? { ...row, completed: !row.completed } : row) } : candidate) }))}><Check size={18} /></button>
         </div>})}
         <button className="wk-add-set" onClick={() => update((current) => ({ ...current, exercises: current.exercises.map((candidate, index) => index === exerciseIndex ? { ...candidate, sets: [...candidate.sets, { id: crypto.randomUUID(), weight: '', reps: '', completed: false }] } : candidate) }))}><Plus size={16} />Add set</button>
